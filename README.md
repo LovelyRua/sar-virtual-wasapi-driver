@@ -36,6 +36,11 @@ Visual Studio, Windows SDK, WDK, and its WIL dependency; see
 install an unsigned driver on a production machine. Test certificates and
 build outputs must not be committed.
 
+The `SysVAD build` workflow restores the upstream pinned WDK NuGet packages
+and compiles only the core `TabletAudioSample` project. The optional APO
+projects are deliberately excluded at this stage. CI does not publish or
+install the generated driver binary.
+
 ## Exit criteria for the first SAR endpoint
 
 - Device Manager and WASAPI enumerate the SAR-named render/capture endpoints.
