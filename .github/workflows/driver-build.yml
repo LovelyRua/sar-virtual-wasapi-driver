@@ -13,10 +13,13 @@ jobs:
       - uses: microsoft/setup-msbuild@v2
       - name: Restore pinned WDK packages
         run: nuget restore packages.config -PackagesDirectory packages -NonInteractive
-      - name: Locate restored WDK tools
+      - name: Add pinned WDK tools to PATH
         run: |
-          Get-ChildItem packages -Recurse -Filter stampinf.exe | Select-Object -ExpandProperty FullName
-          Get-ChildItem packages -Recurse -Filter Microsoft.Windows.WDK.x64.props | Select-Object -ExpandProperty FullName
+          $toolDir = Join-Path $PWD 'packages/Microsoft.Windows.WDK.x64.10.0.28000.2526/c/bin/10.0.28000.0/x64'
+          if (-not (Test-Path (Join-Path $toolDir 'stampinf.exe'))) {
+            throw 'Pinned WDK stampinf.exe is missing'
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $toolDir
       - name: Build core WaveRT driver
         run: >-
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
