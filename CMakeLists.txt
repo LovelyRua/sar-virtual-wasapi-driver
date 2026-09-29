@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.20)
+project(sar_virtual_wasapi_transport LANGUAGES CXX)
+
+enable_testing()
+add_executable(pcm_frame_ring_test tests/pcm_frame_ring_test.cpp)
+target_compile_features(pcm_frame_ring_test PRIVATE cxx_std_17)
+target_include_directories(pcm_frame_ring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(pcm_frame_ring_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(pcm_frame_ring_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME pcm_frame_ring_test COMMAND pcm_frame_ring_test)
