@@ -49,6 +49,12 @@ and compiles only the core `TabletAudioSample` project. The optional APO
 projects are deliberately excluded at this stage. CI does not publish or
 install the generated driver binary.
 
+A manually dispatched CI run retains a three-day build-evidence artifact with
+the driver binary, generated INF/catalog files if present, and SHA-256 hashes.
+It is not a release or an installable package: CI's temporary signing identity
+is not provisioned on the driver lab. Build and sign locally inside the
+dedicated lab before attempting endpoint installation.
+
 ## Exit criteria for the first SAR endpoint
 
 - Device Manager and WASAPI enumerate the SAR-named render/capture endpoints.

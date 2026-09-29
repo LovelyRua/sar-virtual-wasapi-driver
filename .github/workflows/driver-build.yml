@@ -30,3 +30,25 @@ jobs:
         run: >-
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
           /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+      - name: Collect lab build evidence
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $output = 'audio/sysvad/TabletAudioSample/x64/Release'
+          $driver = Join-Path $output 'TabletAudioSample.sys'
+          if (-not (Test-Path $driver)) { throw 'Driver binary is missing' }
+          $evidence = Join-Path $PWD 'lab-build-evidence'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          Get-ChildItem -Path $output -Recurse -File |
+            Where-Object { $_.Extension -in '.sys', '.inf', '.cat' } |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $evidence }
+          Get-ChildItem -Path $evidence -File |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, $_.Name } |
+            Set-Content -Path (Join-Path $evidence 'SHA256SUMS.txt')
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: sysvad-lab-build-evidence
+          path: lab-build-evidence/
+          if-no-files-found: error
+          retention-days: 3
