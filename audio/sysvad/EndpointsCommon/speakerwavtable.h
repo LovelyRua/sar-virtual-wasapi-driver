@@ -50,7 +50,7 @@ Abstract:
 //
 // Max # of pin instances.
 //
-#define SPEAKER_MAX_INPUT_SYSTEM_STREAMS            6
+#define SPEAKER_MAX_INPUT_SYSTEM_STREAMS            1
 #define SPEAKER_MAX_INPUT_OFFLOAD_STREAMS           MAX_INPUT_OFFLOAD_STREAMS
 #define SPEAKER_MAX_OUTPUT_LOOPBACK_STREAMS         MAX_OUTPUT_LOOPBACK_STREAMS
 
@@ -72,8 +72,8 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE SpeakerAudioEngineSupportedDeviceFormats[] =
             {
                 WAVE_FORMAT_EXTENSIBLE,
                 2,
-                44100,
-                176400,
+                48000,
+                192000,
                 4,
                 16,
                 sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
