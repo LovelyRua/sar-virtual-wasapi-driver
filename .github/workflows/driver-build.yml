@@ -13,6 +13,10 @@ jobs:
       - uses: microsoft/setup-msbuild@v2
       - name: Restore pinned WDK packages
         run: nuget restore packages.config -PackagesDirectory packages -NonInteractive
+      - name: Locate restored WDK tools
+        run: |
+          Get-ChildItem packages -Recurse -Filter stampinf.exe | Select-Object -ExpandProperty FullName
+          Get-ChildItem packages -Recurse -Filter Microsoft.Windows.WDK.x64.props | Select-Object -ExpandProperty FullName
       - name: Build core WaveRT driver
         run: >-
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
