@@ -15,6 +15,10 @@ Microsoft's [Windows driver samples](https://github.com/microsoft/Windows-driver
 at commit `2dc3fd3a0cc84a2933f2194e7ec0871584979071`. The original MS-PL
 license and source notices are retained. See `NOTICE.md`.
 
+`src/pcm_frame_ring.h` is an allocation-free, frame-aligned transport
+primitive with standalone tests. It is not yet connected to the kernel stream
+callbacks, so passing those tests does not prove endpoint audio transfer.
+
 The initial target is one paired stereo render/capture bus. The Windows app
 renders to the virtual render endpoint; SAR reads that stream with WASAPI
 loopback. For the reverse direction, SAR renders to a second virtual render
