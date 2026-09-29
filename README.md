@@ -8,16 +8,24 @@ headers, or private SAR transport structures into this repository.
 
 ## Current state
 
-`audio/sysvad/` is an **unmodified upstream sample snapshot**, not an SAR
-driver. It may enumerate demonstration endpoints, but it does not pass SAR
-audio. Do not install or distribute it as a product. The source was copied from
+`audio/sysvad/` began as an upstream sample snapshot and now contains a narrow
+experimental stereo bridge. It is not a product driver. Do not install or
+distribute it as one. The source was copied from
 Microsoft's [Windows driver samples](https://github.com/microsoft/Windows-driver-samples/tree/2dc3fd3a0cc84a2933f2194e7ec0871584979071/audio/sysvad)
 at commit `2dc3fd3a0cc84a2933f2194e7ec0871584979071`. The original MS-PL
 license and source notices are retained. See `NOTICE.md`.
 
 `src/pcm_frame_ring.h` is an allocation-free, frame-aligned transport
-primitive with standalone tests. It is not yet connected to the kernel stream
-callbacks, so passing those tests does not prove endpoint audio transfer.
+primitive with standalone tests. The experimental bridge uses it in the
+kernel stream callbacks. Passing its unit tests or the driver build does not
+prove endpoint audio transfer.
+
+The bridge currently connects the sample Speaker render stream to MicArray1
+RAW capture when both negotiate 48 kHz, 16-bit stereo PCM. It uses a fixed
+4096-frame ring in nonpaged adapter storage and emits silence on an empty
+read. It does not resample, mix simultaneous clients, synchronize independent
+clocks, expose SAR-branded endpoints, or provide production diagnostics. The
+paired endpoints still require real Windows playback/capture testing.
 
 The initial target is one paired stereo render/capture bus. The Windows app
 renders to the virtual render endpoint; SAR reads that stream with WASAPI

@@ -441,6 +441,11 @@ public:
     {
         return m_pAdapterCommon; 
     };
+
+    eDeviceType GetDeviceType() const
+    {
+        return m_DeviceType;
+    }
 #pragma code_seg()
 
 #ifdef SYSVAD_BTH_BYPASS
