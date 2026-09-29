@@ -3,6 +3,7 @@ name: Transport
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   windows:
@@ -15,3 +16,10 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: wasapi-bridge-probe-x64
+          path: build/Release/wasapi_bridge_probe.exe
+          if-no-files-found: error
+          retention-days: 3

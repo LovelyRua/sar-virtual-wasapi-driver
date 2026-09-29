@@ -190,6 +190,9 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
 int wmain(int argc, wchar_t** argv) {
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(initialized)) return 1;
+    struct Apartment {
+        ~Apartment() { CoUninitialize(); }
+    } apartment;
     try {
         ComPtr<IMMDeviceEnumerator> enumerator;
         Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
@@ -198,19 +201,14 @@ int wmain(int argc, wchar_t** argv) {
             ListEndpoints(enumerator.Get(), eRender);
             ListEndpoints(enumerator.Get(), eCapture);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--run") {
-            const int result = Run(enumerator.Get(), argv[2], argv[3]);
-            CoUninitialize();
-            return result;
+            return Run(enumerator.Get(), argv[2], argv[3]);
         } else {
             std::wcerr << L"Usage: wasapi_bridge_probe --list | --run <render-id> <capture-id>\n";
-            CoUninitialize();
             return 1;
         }
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
-        CoUninitialize();
         return 1;
     }
-    CoUninitialize();
     return 0;
 }

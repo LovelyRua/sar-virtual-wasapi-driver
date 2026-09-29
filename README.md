@@ -59,7 +59,8 @@ dedicated lab before attempting endpoint installation.
 
 After installing the experimental driver in the dedicated lab, build the
 standalone user-mode probe with CMake and run it in an interactive audio
-session:
+session. A manual `Transport` workflow run also retains the x64 probe
+executable for three days, without changing driver signing or installation:
 
 ```bat
 cmake -S . -B build -A x64
