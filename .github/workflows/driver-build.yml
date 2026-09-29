@@ -1,0 +1,32 @@
+name: SysVAD build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  driver:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v3
+        with:
+          msbuild-architecture: x64
+      - name: Restore pinned WDK packages
+        run: nuget restore packages.config -PackagesDirectory packages -NonInteractive
+      - name: Add pinned WDK tools to PATH
+        run: |
+          $toolDir = Join-Path $PWD 'packages/Microsoft.Windows.WDK.x64.10.0.28000.2526/c/bin/10.0.28000.0/x64'
+          if (-not (Test-Path (Join-Path $toolDir 'stampinf.exe'))) {
+            throw 'Pinned WDK stampinf.exe is missing'
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $toolDir
+      - name: Build shared WaveRT library
+        run: >-
+          msbuild audio/sysvad/EndpointsCommon/EndpointsCommon.vcxproj
+          /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+      - name: Build core WaveRT driver
+        run: >-
+          msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
+          /p:Configuration=Release /p:Platform=x64 /m /v:minimal
