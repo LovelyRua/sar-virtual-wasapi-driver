@@ -55,10 +55,13 @@ jobs:
           foreach ($name in @('ComponentizedAudioSample.inf', 'TabletAudioSample.sys', 'KeywordDetectorContosoAdapter.dll')) {
             Copy-Item -LiteralPath (Join-Path $evidence $name) -Destination $package
           }
-          $inf2cat = Get-ChildItem 'packages', 'C:/Program Files (x86)/Windows Kits/10/bin' -Recurse -File -Filter 'Inf2Cat.exe' -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '[\\/]x64[\\/]Inf2Cat\.exe$' } |
-            Select-Object -First 1
-          if (-not $inf2cat) { throw 'WDK Inf2Cat.exe was not found' }
+          $kitRoots = @('packages', 'C:/Program Files (x86)/Windows Kits', 'C:/Program Files/Windows Kits')
+          $inf2cat = Get-ChildItem $kitRoots -Recurse -File -Filter 'Inf2Cat.exe' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $inf2cat) {
+            Get-ChildItem $kitRoots -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw 'WDK Inf2Cat.exe was not found in restored packages or Windows Kits'
+          }
           & $inf2cat.FullName "/driver:$package" /os:10_25H2_X64 /verbose
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $package 'sysvad.cat'))) {
             throw 'Core package catalog generation failed'
