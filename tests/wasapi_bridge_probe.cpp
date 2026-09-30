@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <audioclient.h>
+#include <endpointvolume.h>
 #include <propkey.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
@@ -46,6 +47,34 @@ WAVEFORMATEXTENSIBLE StereoFormat() {
     format.dwChannelMask = KSAUDIO_SPEAKER_STEREO;
     format.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
     return format;
+}
+
+void DescribeEndpoint(IMMDevice* device, IAudioClient* client, const char* role) {
+    WAVEFORMATEX* mixFormat = nullptr;
+    const HRESULT formatResult = client->GetMixFormat(&mixFormat);
+    if (SUCCEEDED(formatResult) && mixFormat != nullptr) {
+        std::cout << role << "_mix_format tag=" << mixFormat->wFormatTag
+                  << " channels=" << mixFormat->nChannels
+                  << " rate=" << mixFormat->nSamplesPerSec
+                  << " bits=" << mixFormat->wBitsPerSample << '\n';
+        CoTaskMemFree(mixFormat);
+    } else {
+        std::cout << role << "_mix_format_error=0x" << std::hex
+                  << static_cast<unsigned long>(formatResult) << std::dec << '\n';
+        if (mixFormat != nullptr) CoTaskMemFree(mixFormat);
+    }
+
+    ComPtr<IAudioEndpointVolume> volume;
+    const HRESULT volumeResult = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL,
+                                                  nullptr, reinterpret_cast<void**>(volume.GetAddressOf()));
+    BOOL muted = FALSE;
+    const HRESULT muteResult = SUCCEEDED(volumeResult) ? volume->GetMute(&muted) : volumeResult;
+    if (SUCCEEDED(muteResult)) {
+        std::cout << role << "_muted=" << (muted ? 1 : 0) << '\n';
+    } else {
+        std::cout << role << "_mute_unavailable=0x" << std::hex
+                  << static_cast<unsigned long>(muteResult) << std::dec << '\n';
+    }
 }
 
 void ListEndpoints(IMMDeviceEnumerator* enumerator, EDataFlow direction) {
@@ -97,7 +126,15 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     Check(renderDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                                  reinterpret_cast<void**>(render.GetAddressOf())), "Activate render");
     Check(captureDevice->Activate(__uuidof(IAudioClient2), CLSCTX_ALL, nullptr,
-                                  reinterpret_cast<void**>(capture.GetAddressOf())), "Activate capture");
+                                   reinterpret_cast<void**>(capture.GetAddressOf())), "Activate capture");
+
+    DWORD sessionId = 0;
+    if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId)) {
+        std::cout << "process_session=" << sessionId
+                  << " console_session=" << WTSGetActiveConsoleSessionId() << '\n';
+    }
+    DescribeEndpoint(renderDevice.Get(), render.Get(), "render");
+    DescribeEndpoint(captureDevice.Get(), capture.Get(), "capture");
 
     AudioClientProperties properties{};
     properties.cbSize = sizeof(properties);
