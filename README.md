@@ -78,6 +78,7 @@ cmake -S . -B build -A x64
 cmake --build build --config Release --target wasapi_bridge_probe
 build\Release\wasapi_bridge_probe.exe --list
 build\Release\wasapi_bridge_probe.exe --run "<Speaker render ID>" "<MicArray1 capture ID>"
+build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArray1 capture ID>"
 ```
 
 The probe requests 48 kHz, 16-bit stereo and RAW capture. It sends different
@@ -87,6 +88,27 @@ Exit code 0 requires at least two seconds of capture, nontrivial tone energy,
 and 20 dB of cross-channel separation. This is a functional smoke test, not a
 latency, xrun, clock-drift, or long-run stability certification. Save the full
 output and HRESULT on failure; do not substitute another endpoint silently.
+
+## VM24 lab result (2026-09-30)
+
+On the dedicated Windows 11 driver lab, a locally test-signed core package
+installed successfully as `ROOT\MEDIA\0001` with PnP status `OK`. WASAPI
+enumerated the sample Speaker render and MicArray1 Front capture endpoints.
+This establishes installation and enumeration only, not audio transfer.
+
+The probe ran under a non-interactive WinRM session with no logged-on desktop
+user. Shared-mode capture returned 191040 silent frames after 144096 rendered
+frames. Exclusive-mode capture returned 118080 frames without the silent flag,
+but every sample was zero. The unbridged MicArray2 Rear control capture was
+also silent in shared mode. These results do not isolate a kernel bridge defect
+from session, endpoint, or format behavior. Repeat in an interactive audio
+session and inspect negotiated kernel format and processing mode before
+claiming the bridge works or changing its realtime path.
+
+After the test, the sample device and its OEM INF were removed. The temporary
+lab certificate was removed from LocalMachine My, Root, and TrustedPublisher;
+test signing was turned off and Secure Boot was restored and verified after
+reboot. The pre-test VM snapshot remains available for the next lab iteration.
 
 ## Exit criteria for the first SAR endpoint
 
