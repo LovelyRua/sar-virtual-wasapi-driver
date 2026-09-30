@@ -62,6 +62,12 @@ It is not a release or an installable package: CI's temporary signing identity
 is not provisioned on the driver lab. Build and sign locally inside the
 dedicated lab before attempting endpoint installation.
 
+On the lab, run `scripts/lab-preflight.ps1 -PackagePath <core-package>` to
+record the package hashes, administrator token, Secure Boot, test-signing, and
+catalog signature state. A restricted PowerShell execution policy can be left
+unchanged by invoking the script over WinRM with `Invoke-Command -FilePath`.
+The preflight does not install a driver or alter boot policy.
+
 After installing the experimental driver in the dedicated lab, build the
 standalone user-mode probe with CMake and run it in an interactive audio
 session. A manual `Transport` workflow run also retains the x64 probe
