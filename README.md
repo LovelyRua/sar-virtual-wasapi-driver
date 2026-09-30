@@ -110,6 +110,19 @@ lab certificate was removed from LocalMachine My, Root, and TrustedPublisher;
 test signing was turned off and Secure Boot was restored and verified after
 reboot. The pre-test VM snapshot remains available for the next lab iteration.
 
+As a Session 0 control, the same probe rendered 144096 frames into the VM's
+pre-existing VB-Cable pair and captured 180672 frames, all flagged silent.
+Both endpoints reported 48 kHz, 32-bit stereo mix formats and neither was
+muted. This strengthens the need for an interactive-session control before
+attributing silence to the sample driver.
+
+When a desktop user is logged on, `scripts/lab-interactive-probe.ps1` can be
+invoked on the lab through WinRM with `Invoke-Command -FilePath` and the probe
+path, endpoint IDs, and output path. It runs the probe under that user's
+interactive token, writes a report on the VM, and removes its temporary
+scheduled task. It does not accept or store a password. First run it against
+the known VB-Cable pair; only then repeat against the experimental driver.
+
 ## Exit criteria for the first SAR endpoint
 
 - Device Manager and WASAPI enumerate the SAR-named render/capture endpoints.
