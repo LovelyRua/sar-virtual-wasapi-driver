@@ -26,6 +26,10 @@ jobs:
         run: >-
           msbuild audio/sysvad/EndpointsCommon/EndpointsCommon.vcxproj
           /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+      - name: Build keyword detector adapter required by the INF
+        run: >-
+          msbuild audio/sysvad/KeywordDetectorAdapter/KeywordDetectorContosoAdapter.vcxproj
+          /p:Configuration=Release /p:Platform=x64 /m /v:minimal
       - name: Build core WaveRT driver
         run: >-
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
@@ -37,11 +41,15 @@ jobs:
           $output = 'audio/sysvad/TabletAudioSample/x64/Release'
           $driver = Join-Path $output 'TabletAudioSample.sys'
           if (-not (Test-Path $driver)) { throw 'Driver binary is missing' }
+          $adapter = @(Get-ChildItem 'audio/sysvad/KeywordDetectorAdapter' -Recurse -File -Filter 'KeywordDetectorContosoAdapter.dll' |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' })
+          if ($adapter.Count -ne 1) { throw "Expected one INF-required adapter DLL; found $($adapter.Count)" }
           $evidence = Join-Path $PWD 'lab-build-evidence'
           New-Item -ItemType Directory -Path $evidence | Out-Null
           Get-ChildItem -Path $output -Recurse -File |
             Where-Object { $_.Extension -in '.sys', '.inf', '.cat' } |
             ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $evidence }
+          Copy-Item -LiteralPath $adapter[0].FullName -Destination $evidence
           Get-ChildItem -Path $evidence -File |
             ForEach-Object { "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, $_.Name } |
             Set-Content -Path (Join-Path $evidence 'SHA256SUMS.txt')
