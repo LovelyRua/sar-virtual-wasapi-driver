@@ -54,6 +54,10 @@ stage. CI does not publish or install the generated driver binary.
 A manually dispatched CI run retains a three-day build-evidence artifact with
 the driver binary, INF-required adapter DLL, generated INF/catalog files if
 present, and SHA-256 hashes.
+It also runs Inf2Cat for Windows 11 25H2 x64 over a self-contained
+`core-package/` directory containing the core INF, SYS, adapter DLL, and
+unsigned `sysvad.cat`. Catalog generation checks package signability but does
+not sign the catalog or make the package installable under normal boot policy.
 It is not a release or an installable package: CI's temporary signing identity
 is not provisioned on the driver lab. Build and sign locally inside the
 dedicated lab before attempting endpoint installation.
