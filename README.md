@@ -78,10 +78,12 @@ cmake -S . -B build -A x64
 cmake --build build --config Release --target wasapi_bridge_probe
 build\Release\wasapi_bridge_probe.exe --list
 build\Release\wasapi_bridge_probe.exe --run "<Speaker render ID>" "<MicArray1 capture ID>"
+build\Release\wasapi_bridge_probe.exe --default "<Speaker render ID>" "<MicArray1 capture ID>"
 build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArray1 capture ID>"
 ```
 
-The probe requests 48 kHz, 16-bit stereo and RAW capture. It sends different
+The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request
+RAW capture; `--default` uses ordinary shared-mode capture without RAW. It sends different
 tones on left and right for three seconds, records four seconds, then reports
 frame counts, silence flags, desired-tone power, and cross-channel power.
 Exit code 0 requires at least two seconds of capture, nontrivial tone energy,
@@ -122,6 +124,26 @@ path, endpoint IDs, and output path. It runs the probe under that user's
 interactive token, writes a report on the VM, and removes its temporary
 scheduled task. It does not accept or store a password. First run it against
 the known VB-Cable pair; only then repeat against the experimental driver.
+
+## REAPER shared-mode finding (2026-10-01)
+
+An interactive-session RAW probe against the experimental Speaker and MicArray1
+Front endpoints passed: 142464 rendered frames, 188544 captured frames, no
+silent flags, and `PROBE_EXIT=0`. REAPER 7.41 also opened the same endpoints in
+shared mode at 48 kHz (one input, two outputs), but its 28.28-second recording
+was a constant -6.0 dBFS peak / -9.0 dBFS RMS signal, including after the
+10-second click source ended. This was the upstream SysVAD 2 kHz tone, not a
+successful user-mode loopback. The test recording remains on VM24 at
+`C:\Users\codex\Documents\REAPER Media\02-260930_1847.wav`.
+
+The bridge's capture predicate had required RAW processing mode, so ordinary
+shared-mode capture fell through to the sample tone generator. The predicate
+now accepts the matching MicArray1 48 kHz, 16-bit stereo kernel stream in any
+processing mode, and the probe offers `--default` to test that path. This
+change has not passed a new driver installation or REAPER recording yet; do
+not claim shared-mode loopback until both are repeated on the lab. After the
+failed test, the sample device and test certificate were removed, test signing
+was disabled, and Secure Boot was restored and verified.
 
 ## Exit criteria for the first SAR endpoint
 

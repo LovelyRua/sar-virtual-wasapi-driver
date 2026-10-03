@@ -115,7 +115,7 @@ double TonePower(const std::vector<int16_t>& samples, size_t startFrame,
 }
 
 int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t* captureId,
-        bool exclusive) {
+        bool exclusive, bool rawCapture) {
     ComPtr<IMMDevice> renderDevice;
     ComPtr<IMMDevice> captureDevice;
     Check(enumerator->GetDevice(renderId, &renderDevice), "Get render device");
@@ -136,11 +136,13 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     DescribeEndpoint(renderDevice.Get(), render.Get(), "render");
     DescribeEndpoint(captureDevice.Get(), capture.Get(), "capture");
 
-    AudioClientProperties properties{};
-    properties.cbSize = sizeof(properties);
-    properties.eCategory = AudioCategory_Other;
-    properties.Options = AUDCLNT_STREAMOPTIONS_RAW;
-    Check(capture->SetClientProperties(&properties), "Enable RAW capture");
+    if (rawCapture) {
+        AudioClientProperties properties{};
+        properties.cbSize = sizeof(properties);
+        properties.eCategory = AudioCategory_Other;
+        properties.Options = AUDCLNT_STREAMOPTIONS_RAW;
+        Check(capture->SetClientProperties(&properties), "Enable RAW capture");
+    }
 
     WAVEFORMATEXTENSIBLE format = StereoFormat();
     const auto shareMode = exclusive ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
@@ -148,7 +150,7 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     Check(render->Initialize(shareMode, 0, 200000, period, &format.Format, nullptr),
            "Initialize render at 48 kHz 16-bit stereo");
     Check(capture->Initialize(shareMode, 0, 200000, period, &format.Format, nullptr),
-           "Initialize RAW capture at 48 kHz 16-bit stereo");
+           "Initialize capture at 48 kHz 16-bit stereo");
 
     ComPtr<IAudioRenderClient> writer;
     ComPtr<IAudioCaptureClient> reader;
@@ -241,11 +243,14 @@ int wmain(int argc, wchar_t** argv) {
             ListEndpoints(enumerator.Get(), eRender);
             ListEndpoints(enumerator.Get(), eCapture);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--run") {
-            return Run(enumerator.Get(), argv[2], argv[3], false);
+            return Run(enumerator.Get(), argv[2], argv[3], false, true);
+        } else if (argc == 4 && std::wstring(argv[1]) == L"--default") {
+            return Run(enumerator.Get(), argv[2], argv[3], false, false);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--exclusive") {
-            return Run(enumerator.Get(), argv[2], argv[3], true);
+            return Run(enumerator.Get(), argv[2], argv[3], true, true);
         } else {
             std::wcerr << L"Usage: wasapi_bridge_probe --list | --run <render-id> <capture-id>"
+                          L" | --default <render-id> <capture-id>"
                           L" | --exclusive <render-id> <capture-id>\n";
             return 1;
         }

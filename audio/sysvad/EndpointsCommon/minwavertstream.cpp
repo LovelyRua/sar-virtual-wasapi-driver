@@ -1417,8 +1417,7 @@ BOOLEAN CMiniportWaveRTStream::IsBridgeRender() const
 BOOLEAN CMiniportWaveRTStream::IsBridgeCapture() const
 {
     return m_bCapture && IsBridgeFormat() &&
-           m_pMiniport->GetDeviceType() == eMicArrayDevice1 &&
-           IsEqualGUID(m_SignalProcessingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);
+           m_pMiniport->GetDeviceType() == eMicArrayDevice1;
 }
 
 //=============================================================================
