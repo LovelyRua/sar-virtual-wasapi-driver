@@ -1416,8 +1416,14 @@ BOOLEAN CMiniportWaveRTStream::IsBridgeRender() const
 
 BOOLEAN CMiniportWaveRTStream::IsBridgeCapture() const
 {
-    return m_bCapture && IsBridgeFormat() &&
-           m_pMiniport->GetDeviceType() == eMicArrayDevice1;
+    if (!m_bCapture || m_pMiniport->GetDeviceType() != eMicArrayDevice1 ||
+        m_pWfExt == NULL) return FALSE;
+    const WAVEFORMATEX& format = m_pWfExt->Format;
+    return format.wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+           format.nSamplesPerSec == 48000 && format.wBitsPerSample == 16 &&
+           ((format.nChannels == 1 && format.nBlockAlign == 2) ||
+            (format.nChannels == 2 && format.nBlockAlign == 4)) &&
+           IsEqualGUID(m_pWfExt->SubFormat, KSDATAFORMAT_SUBTYPE_PCM);
 }
 
 //=============================================================================
@@ -1545,7 +1551,30 @@ ByteDisplacement - # of bytes to process.
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
         if (IsBridgeCapture())
         {
-            m_pMiniport->GetAdapterCommObj()->BridgeRead(m_pDmaBuffer + bufferOffset, runWrite);
+            if (m_pWfExt->Format.nChannels == 1)
+            {
+                SHORT stereo[512];
+                ULONG framesRemaining = runWrite / sizeof(SHORT);
+                BYTE* output = m_pDmaBuffer + bufferOffset;
+                while (framesRemaining != 0)
+                {
+                    const ULONG frames = min(framesRemaining, 256UL);
+                    m_pMiniport->GetAdapterCommObj()->BridgeRead(
+                        reinterpret_cast<BYTE*>(stereo), frames * 2 * sizeof(SHORT));
+                    SHORT* mono = reinterpret_cast<SHORT*>(output);
+                    for (ULONG frame = 0; frame < frames; ++frame)
+                    {
+                        mono[frame] = static_cast<SHORT>(
+                            (static_cast<LONG>(stereo[frame * 2]) + stereo[frame * 2 + 1]) / 2);
+                    }
+                    output += frames * sizeof(SHORT);
+                    framesRemaining -= frames;
+                }
+            }
+            else
+            {
+                m_pMiniport->GetAdapterCommObj()->BridgeRead(m_pDmaBuffer + bufferOffset, runWrite);
+            }
         }
         else
         {
