@@ -414,7 +414,7 @@ Return Value:
             return ntStatus;
         }
     }
-    else if (!g_DoNotCreateDataFiles)
+    else if (!g_DoNotCreateDataFiles && !IsBridgeRender())
     {
         //
         // Create an output file for the render data.
@@ -551,7 +551,7 @@ NTSTATUS CMiniportWaveRTStream::AllocateBufferWithNotification
 
     RequestedSize_ -= RequestedSize_ % (m_pWfExt->Format.nBlockAlign);
     
-    if (!m_bCapture && !g_DoNotCreateDataFiles)
+    if (!m_bCapture && !g_DoNotCreateDataFiles && !IsBridgeRender())
     {
         NTSTATUS ntStatus;
         
@@ -1211,8 +1211,13 @@ NTSTATUS CMiniportWaveRTStream::SetState
 
             KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
 
+            if (IsBridgeRender() || IsBridgeCapture())
+            {
+                pAdapterComm->BridgeReset();
+            }
+
             // Wait until all work items are completed.
-            if (!m_bCapture && !g_DoNotCreateDataFiles)
+            if (!m_bCapture && !g_DoNotCreateDataFiles && !IsBridgeRender())
             {
                 m_SaveData.WaitAllWorkItems();
             }
@@ -1392,6 +1397,35 @@ NTSTATUS CMiniportWaveRTStream::SetFormat
 
 #pragma code_seg()
 
+BOOLEAN CMiniportWaveRTStream::IsBridgeFormat() const
+{
+    if (m_pWfExt == NULL) return FALSE;
+    const WAVEFORMATEX& format = m_pWfExt->Format;
+    return format.wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+           format.nChannels == 2 && format.nSamplesPerSec == 48000 &&
+           format.wBitsPerSample == 16 && format.nBlockAlign == 4 &&
+           IsEqualGUID(m_pWfExt->SubFormat, KSDATAFORMAT_SUBTYPE_PCM);
+}
+
+BOOLEAN CMiniportWaveRTStream::IsBridgeRender() const
+{
+    return !m_bCapture && IsBridgeFormat() &&
+           m_pMiniport->GetDeviceType() == eSpeakerDevice &&
+           !m_pMiniport->IsOffloadPin(m_ulPin);
+}
+
+BOOLEAN CMiniportWaveRTStream::IsBridgeCapture() const
+{
+    if (!m_bCapture || m_pMiniport->GetDeviceType() != eMicArrayDevice1 ||
+        m_pWfExt == NULL) return FALSE;
+    const WAVEFORMATEX& format = m_pWfExt->Format;
+    return format.wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+           format.nSamplesPerSec == 48000 && format.wBitsPerSample == 16 &&
+           ((format.nChannels == 1 && format.nBlockAlign == 2) ||
+            (format.nChannels == 2 && format.nBlockAlign == 4)) &&
+           IsEqualGUID(m_pWfExt->SubFormat, KSDATAFORMAT_SUBTYPE_PCM);
+}
+
 //=============================================================================
 #pragma code_seg()
 VOID CMiniportWaveRTStream::UpdatePosition
@@ -1469,9 +1503,8 @@ VOID CMiniportWaveRTStream::UpdatePosition
                                         0);
         }
 
-        if (!g_DoNotCreateDataFiles)
+        if (IsBridgeRender() || !g_DoNotCreateDataFiles)
         {
-            // Read from buffer and write to a file.
             ReadBytes(ByteDisplacement);
         }
     }
@@ -1516,7 +1549,37 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
+        if (IsBridgeCapture())
+        {
+            if (m_pWfExt->Format.nChannels == 1)
+            {
+                SHORT stereo[512];
+                ULONG framesRemaining = runWrite / sizeof(SHORT);
+                BYTE* output = m_pDmaBuffer + bufferOffset;
+                while (framesRemaining != 0)
+                {
+                    const ULONG frames = min(framesRemaining, 256UL);
+                    m_pMiniport->GetAdapterCommObj()->BridgeRead(
+                        reinterpret_cast<BYTE*>(stereo), frames * 2 * sizeof(SHORT));
+                    SHORT* mono = reinterpret_cast<SHORT*>(output);
+                    for (ULONG frame = 0; frame < frames; ++frame)
+                    {
+                        mono[frame] = static_cast<SHORT>(
+                            (static_cast<LONG>(stereo[frame * 2]) + stereo[frame * 2 + 1]) / 2);
+                    }
+                    output += frames * sizeof(SHORT);
+                    framesRemaining -= frames;
+                }
+            }
+            else
+            {
+                m_pMiniport->GetAdapterCommObj()->BridgeRead(m_pDmaBuffer + bufferOffset, runWrite);
+            }
+        }
+        else
+        {
             m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);
+        }
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }
@@ -1547,7 +1610,14 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
+        if (IsBridgeRender())
+        {
+            m_pMiniport->GetAdapterCommObj()->BridgeWrite(m_pDmaBuffer + bufferOffset, runWrite);
+        }
+        else
+        {
+            m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
+        }
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }

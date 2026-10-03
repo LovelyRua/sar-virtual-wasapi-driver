@@ -258,6 +258,9 @@ private:
     //
     // Helper functions.
     //
+    BOOLEAN IsBridgeFormat() const;
+    BOOLEAN IsBridgeRender() const;
+    BOOLEAN IsBridgeCapture() const;
     
 #pragma code_seg()
     ULONG

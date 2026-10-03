@@ -469,6 +469,22 @@ DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
         THIS
     ) PURE;
 
+    STDMETHOD_(VOID, BridgeWrite)
+    (
+        THIS_
+        _In_reads_bytes_(Bytes) const BYTE* Data,
+        _In_ ULONG Bytes
+    ) PURE;
+
+    STDMETHOD_(VOID, BridgeRead)
+    (
+        THIS_
+        _Out_writes_bytes_(Bytes) BYTE* Data,
+        _In_ ULONG Bytes
+    ) PURE;
+
+    STDMETHOD_(VOID, BridgeReset)(THIS) PURE;
+
     STDMETHOD_(VOID,            SetWaveServiceGroup) 
     ( 
         THIS_

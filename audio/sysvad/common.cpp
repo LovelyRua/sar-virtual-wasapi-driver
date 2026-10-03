@@ -20,6 +20,7 @@ Abstract:
 #include "savedata.h"
 #include "IHVPrivatePropertySet.h"
 #include "simple.h"
+#include "../../src/pcm_frame_ring.h"
 
 #ifdef SYSVAD_BTH_BYPASS
 #include <limits.h>
@@ -84,6 +85,10 @@ class CAdapterCommon :
         PCSYSVADHW              m_pHW;                  // Virtual SYSVAD HW object
         PPORTCLSETWHELPER       m_pPortClsEtwHelper;
 
+        KSPIN_LOCK              m_BridgeLock;
+        BYTE                    m_BridgeStorage[4096 * 4];
+        sar_driver::PcmFrameRing m_BridgeRing;
+
         static LONG             m_AdapterInstances;     // # of adapter objects.
 
         DWORD                   m_dwIdleRequests;
@@ -122,6 +127,12 @@ class CAdapterCommon :
         STDMETHODIMP_(PDEVICE_OBJECT)   GetPhysicalDeviceObject(void);
         
         STDMETHODIMP_(WDFDEVICE)        GetWdfDevice(void);
+
+        STDMETHODIMP_(VOID) BridgeWrite(_In_reads_bytes_(Bytes) const BYTE* Data,
+                                       _In_ ULONG Bytes);
+        STDMETHODIMP_(VOID) BridgeRead(_Out_writes_bytes_(Bytes) BYTE* Data,
+                                      _In_ ULONG Bytes);
+        STDMETHODIMP_(VOID) BridgeReset(void);
 
         STDMETHODIMP_(void)     SetWaveServiceGroup
         (   
@@ -738,6 +749,42 @@ Return Value:
 } // GetWdfDevice
 
 //=============================================================================
+#pragma code_seg()
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeWrite(_In_reads_bytes_(Bytes) const BYTE* Data, _In_ ULONG Bytes)
+{
+    if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0) return;
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&m_BridgeLock, &oldIrql);
+    m_BridgeRing.Write(Data, Bytes / 4);
+    KeReleaseSpinLock(&m_BridgeLock, oldIrql);
+}
+
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeRead(_Out_writes_bytes_(Bytes) BYTE* Data, _In_ ULONG Bytes)
+{
+    if (Data == NULL || Bytes == 0) return;
+    if ((Bytes % 4) != 0)
+    {
+        RtlZeroMemory(Data, Bytes);
+        return;
+    }
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&m_BridgeLock, &oldIrql);
+    m_BridgeRing.Read(Data, Bytes / 4);
+    KeReleaseSpinLock(&m_BridgeLock, oldIrql);
+}
+
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeReset(void)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&m_BridgeLock, &oldIrql);
+    m_BridgeRing.Reset();
+    KeReleaseSpinLock(&m_BridgeLock, oldIrql);
+}
+
+//=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS
 CAdapterCommon::Init
@@ -788,6 +835,11 @@ Return Value:
     m_PowerState            = PowerDeviceD0;
     m_pHW                   = NULL;
     m_pPortClsEtwHelper     = NULL;
+    KeInitializeSpinLock(&m_BridgeLock);
+    if (!m_BridgeRing.Initialize(m_BridgeStorage, 4096, 4))
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
 
     InitializeListHead(&m_SubdeviceCache);
 

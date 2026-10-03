@@ -26,7 +26,53 @@ jobs:
         run: >-
           msbuild audio/sysvad/EndpointsCommon/EndpointsCommon.vcxproj
           /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+      - name: Build keyword detector adapter required by the INF
+        run: >-
+          msbuild audio/sysvad/KeywordDetectorAdapter/KeywordDetectorContosoAdapter.vcxproj
+          /p:Configuration=Release /p:Platform=x64 /m /v:minimal
       - name: Build core WaveRT driver
         run: >-
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
           /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+      - name: Collect lab build evidence
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $output = 'audio/sysvad/TabletAudioSample/x64/Release'
+          $driver = Join-Path $output 'TabletAudioSample.sys'
+          if (-not (Test-Path $driver)) { throw 'Driver binary is missing' }
+          $adapter = @(Get-ChildItem 'audio/sysvad/KeywordDetectorAdapter' -Recurse -File -Filter 'KeywordDetectorContosoAdapter.dll' |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' })
+          if ($adapter.Count -ne 1) { throw "Expected one INF-required adapter DLL; found $($adapter.Count)" }
+          $evidence = Join-Path $PWD 'lab-build-evidence'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          Get-ChildItem -Path $output -Recurse -File |
+            Where-Object { $_.Extension -in '.sys', '.inf', '.cat' } |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $evidence }
+          Copy-Item -LiteralPath $adapter[0].FullName -Destination $evidence
+          $package = Join-Path $evidence 'core-package'
+          New-Item -ItemType Directory -Path $package | Out-Null
+          foreach ($name in @('ComponentizedAudioSample.inf', 'TabletAudioSample.sys', 'KeywordDetectorContosoAdapter.dll')) {
+            Copy-Item -LiteralPath (Join-Path $evidence $name) -Destination $package
+          }
+          $kitRoots = @('packages', 'C:/Program Files (x86)/Windows Kits', 'C:/Program Files/Windows Kits')
+          $inf2cat = Get-ChildItem $kitRoots -Recurse -File -Filter 'Inf2Cat.exe' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $inf2cat) {
+            Get-ChildItem $kitRoots -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw 'WDK Inf2Cat.exe was not found in restored packages or Windows Kits'
+          }
+          & $inf2cat.FullName "/driver:$package" /os:10_25H2_X64 /verbose
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $package 'sysvad.cat'))) {
+            throw 'Core package catalog generation failed'
+          }
+          Get-ChildItem -Path $evidence -Recurse -File |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, [IO.Path]::GetRelativePath($evidence, $_.FullName) } |
+            Set-Content -Path (Join-Path $evidence 'SHA256SUMS.txt')
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: sysvad-lab-build-evidence
+          path: lab-build-evidence/
+          if-no-files-found: error
+          retention-days: 3
