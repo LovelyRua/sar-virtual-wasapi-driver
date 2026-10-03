@@ -137,13 +137,32 @@ successful user-mode loopback. The test recording remains on VM24 at
 `C:\Users\codex\Documents\REAPER Media\02-260930_1847.wav`.
 
 The bridge's capture predicate had required RAW processing mode, so ordinary
-shared-mode capture fell through to the sample tone generator. The predicate
-now accepts the matching MicArray1 48 kHz, 16-bit stereo kernel stream in any
-processing mode, and the probe offers `--default` to test that path. This
-change has not passed a new driver installation or REAPER recording yet; do
-not claim shared-mode loopback until both are repeated on the lab. After the
-failed test, the sample device and test certificate were removed, test signing
-was disabled, and Secure Boot was restored and verified.
+shared-mode capture fell through to the sample tone generator. Removing the
+mode restriction alone did not fix it: the processed MicArray1 kernel stream
+uses 48 kHz, 16-bit mono PCM, whereas RAW uses 16-bit stereo PCM.
+
+## Processed capture retest (2026-10-03)
+
+The bridge now downmixes stereo ring frames to 16-bit mono on the processed
+MicArray1 path without allocation or floating-point work in the kernel stream.
+On VM24, the interactive `--default` probe passed with 144192 rendered frames,
+192000 captured frames, target power 2.54e16, fixed 2 kHz tone power 1.92e9,
+and `PROBE_EXIT=0`. The RAW stereo control probe also passed with 144576
+rendered frames, 191520 captured frames, and `PROBE_EXIT=0`.
+
+REAPER 7.41 then recorded the experimental Speaker-to-MicArray1 path in shared
+mode at 48 kHz (one input, two outputs, 512 samples). Full-sample analysis of
+the 34.7-second mono 24-bit WAV found click peaks of -12/-6 dBFS during the
+first ten seconds, followed by about -90.3 dBFS peak / -106.2 dBFS RMS after
+the click source ended. This confirms that the capture followed the playback
+source rather than the sample driver's continuous 2 kHz tone. The recording is
+`C:\Users\codex\Documents\REAPER Media\02-261003_0644.wav` on VM24.
+
+These are functional lab results for the Microsoft SysVAD-derived experimental
+device, not a production driver reliability or latency claim. After testing,
+the device, INF and temporary signing certificate were removed. VM24 was
+rebooted and verified with Secure Boot on, test signing off, and no remaining
+experimental device or lab certificate.
 
 ## Exit criteria for the first SAR endpoint
 
