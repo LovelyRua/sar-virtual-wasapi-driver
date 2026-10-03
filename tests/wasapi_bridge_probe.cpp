@@ -145,12 +145,28 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     }
 
     WAVEFORMATEXTENSIBLE format = StereoFormat();
+    const bool defaultCapture = !rawCapture && !exclusive;
+    WAVEFORMATEX* captureMixFormat = nullptr;
+    if (defaultCapture) {
+        Check(capture->GetMixFormat(&captureMixFormat), "Get capture mix format");
+        if (captureMixFormat->nChannels != 1 || captureMixFormat->wBitsPerSample != 32 ||
+            captureMixFormat->wFormatTag != WAVE_FORMAT_EXTENSIBLE ||
+            !IsEqualGUID(reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(captureMixFormat)->SubFormat,
+                         KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+            CoTaskMemFree(captureMixFormat);
+            throw std::runtime_error("Default capture mix format is not mono float32");
+        }
+    }
     const auto shareMode = exclusive ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
     const REFERENCE_TIME period = exclusive ? 200000 : 0;
     Check(render->Initialize(shareMode, 0, 200000, period, &format.Format, nullptr),
            "Initialize render at 48 kHz 16-bit stereo");
-    Check(capture->Initialize(shareMode, 0, 200000, period, &format.Format, nullptr),
-           "Initialize capture at 48 kHz 16-bit stereo");
+    const HRESULT captureResult = capture->Initialize(
+        shareMode, 0, 200000, period,
+        defaultCapture ? captureMixFormat : &format.Format, nullptr);
+    if (captureMixFormat != nullptr) CoTaskMemFree(captureMixFormat);
+    Check(captureResult, defaultCapture ? "Initialize capture at mix format"
+                                        : "Initialize capture at 48 kHz 16-bit stereo");
 
     ComPtr<IAudioRenderClient> writer;
     ComPtr<IAudioCaptureClient> reader;
@@ -195,8 +211,19 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
                 received.insert(received.end(), static_cast<size_t>(frames) * 2, 0);
                 silentFrames += frames;
             } else {
-                const auto* input = reinterpret_cast<const int16_t*>(bytes);
-                received.insert(received.end(), input, input + static_cast<size_t>(frames) * 2);
+                if (defaultCapture) {
+                    const auto* input = reinterpret_cast<const float*>(bytes);
+                    for (UINT32 frame = 0; frame < frames; ++frame) {
+                        const double value = std::isfinite(input[frame]) ? input[frame] : 0.0;
+                        const auto sample = static_cast<int16_t>(
+                            std::clamp(value, -1.0, 1.0) * 32767);
+                        received.push_back(sample);
+                        received.push_back(sample);
+                    }
+                } else {
+                    const auto* input = reinterpret_cast<const int16_t*>(bytes);
+                    received.insert(received.end(), input, input + static_cast<size_t>(frames) * 2);
+                }
             }
             Check(reader->ReleaseBuffer(frames), "Release capture buffer");
             Check(reader->GetNextPacketSize(&packetFrames), "Get capture packet size");
@@ -214,15 +241,20 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     double strongest = 0.0;
     double leakage = 0.0;
     for (size_t start = 0; start + kSampleRate <= capturedFrames; start += kSampleRate / 2) {
-        const double left = TonePower(received, start, kSampleRate, 0, 997);
-        const double right = TonePower(received, start, kSampleRate, 1, 1501);
-        if (left + right > strongest) {
-            strongest = left + right;
-            leakage = TonePower(received, start, kSampleRate, 0, 1501)
+        const double first = TonePower(received, start, kSampleRate, 0, 997);
+        const double second = TonePower(received, start, kSampleRate,
+                                        defaultCapture ? 0 : 1, 1501);
+        if (first + second > strongest) {
+            strongest = first + second;
+            leakage = defaultCapture
+                ? TonePower(received, start, kSampleRate, 0, 2000)
+                : TonePower(received, start, kSampleRate, 0, 1501)
                     + TonePower(received, start, kSampleRate, 1, 997);
         }
     }
-    std::cout << "target_power=" << strongest << " cross_channel_power=" << leakage << '\n';
+    std::cout << "target_power=" << strongest
+              << (defaultCapture ? " fixed_tone_power=" : " cross_channel_power=")
+              << leakage << '\n';
     if (strongest < 1e12 || strongest < leakage * 100.0) return 3;
     return 0;
 }
