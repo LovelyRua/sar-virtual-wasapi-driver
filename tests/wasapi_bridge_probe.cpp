@@ -115,7 +115,7 @@ double TonePower(const std::vector<int16_t>& samples, size_t startFrame,
 }
 
 int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t* captureId,
-        bool exclusive, bool rawCapture) {
+        bool exclusive, bool rawCapture, bool routeCapture = false) {
     ComPtr<IMMDevice> renderDevice;
     ComPtr<IMMDevice> captureDevice;
     Check(enumerator->GetDevice(renderId, &renderDevice), "Get render device");
@@ -147,15 +147,21 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     WAVEFORMATEXTENSIBLE format = StereoFormat();
     const bool defaultCapture = !rawCapture && !exclusive;
     WAVEFORMATEX* captureMixFormat = nullptr;
+    UINT32 captureMixFormatChannels = 0;
     if (defaultCapture) {
         Check(capture->GetMixFormat(&captureMixFormat), "Get capture mix format");
-        if (captureMixFormat->nChannels != 1 || captureMixFormat->wBitsPerSample != 32 ||
-            captureMixFormat->wFormatTag != WAVE_FORMAT_EXTENSIBLE ||
-            !IsEqualGUID(reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(captureMixFormat)->SubFormat,
-                         KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+        if ((captureMixFormat->nChannels != 1 && captureMixFormat->nChannels != 2) ||
+            (routeCapture && captureMixFormat->nChannels != 2) ||
+            captureMixFormat->nSamplesPerSec != kSampleRate ||
+            captureMixFormat->wBitsPerSample != 32 ||
+            !(captureMixFormat->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+              (captureMixFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+               IsEqualGUID(reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(captureMixFormat)->SubFormat,
+                           KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)))) {
             CoTaskMemFree(captureMixFormat);
-            throw std::runtime_error("Default capture mix format is not mono float32");
+            throw std::runtime_error("Capture mix format is not 48 kHz float32 mono/stereo");
         }
+        captureMixFormatChannels = captureMixFormat->nChannels;
     }
     const auto shareMode = exclusive ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
     const REFERENCE_TIME period = exclusive ? 200000 : 0;
@@ -214,11 +220,13 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
                 if (defaultCapture) {
                     const auto* input = reinterpret_cast<const float*>(bytes);
                     for (UINT32 frame = 0; frame < frames; ++frame) {
-                        const double value = std::isfinite(input[frame]) ? input[frame] : 0.0;
-                        const auto sample = static_cast<int16_t>(
-                            std::clamp(value, -1.0, 1.0) * 32767);
-                        received.push_back(sample);
-                        received.push_back(sample);
+                        for (UINT32 channel = 0; channel < 2; ++channel) {
+                            const float value = input[frame * captureMixFormatChannels +
+                                                      std::min(channel, captureMixFormatChannels - 1)];
+                            received.push_back(static_cast<int16_t>(
+                                std::clamp(std::isfinite(value) ? value : 0.0f,
+                                           -1.0f, 1.0f) * 32767));
+                        }
                     }
                 } else {
                     const auto* input = reinterpret_cast<const int16_t*>(bytes);
@@ -240,12 +248,17 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
 
     double strongest = 0.0;
     double leakage = 0.0;
+    double secondChannelPower = 0.0;
     for (size_t start = 0; start + kSampleRate <= capturedFrames; start += kSampleRate / 2) {
         const double first = TonePower(received, start, kSampleRate, 0, 997);
         const double second = TonePower(received, start, kSampleRate,
                                         defaultCapture ? 0 : 1, 1501);
         if (first + second > strongest) {
             strongest = first + second;
+            if (routeCapture) {
+                secondChannelPower = TonePower(received, start, kSampleRate, 1, 997)
+                                   + TonePower(received, start, kSampleRate, 1, 1501);
+            }
             leakage = defaultCapture
                 ? TonePower(received, start, kSampleRate, 0, 2000)
                 : TonePower(received, start, kSampleRate, 0, 1501)
@@ -255,7 +268,9 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     std::cout << "target_power=" << strongest
               << (defaultCapture ? " fixed_tone_power=" : " cross_channel_power=")
               << leakage << '\n';
+    if (routeCapture) std::cout << "second_channel_power=" << secondChannelPower << '\n';
     if (strongest < 1e12 || strongest < leakage * 100.0) return 3;
+    if (routeCapture && secondChannelPower < 1e12) return 4;
     return 0;
 }
 
@@ -278,11 +293,14 @@ int wmain(int argc, wchar_t** argv) {
             return Run(enumerator.Get(), argv[2], argv[3], false, true);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--default") {
             return Run(enumerator.Get(), argv[2], argv[3], false, false);
+        } else if (argc == 4 && std::wstring(argv[1]) == L"--route") {
+            return Run(enumerator.Get(), argv[2], argv[3], false, false, true);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--exclusive") {
             return Run(enumerator.Get(), argv[2], argv[3], true, true);
         } else {
             std::wcerr << L"Usage: wasapi_bridge_probe --list | --run <render-id> <capture-id>"
                           L" | --default <render-id> <capture-id>"
+                          L" | --route <source-render-id> <downstream-capture-id>"
                           L" | --exclusive <render-id> <capture-id>\n";
             return 1;
         }

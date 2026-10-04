@@ -79,15 +79,22 @@ cmake --build build --config Release --target wasapi_bridge_probe
 build\Release\wasapi_bridge_probe.exe --list
 build\Release\wasapi_bridge_probe.exe --run "<Speaker render ID>" "<MicArray1 capture ID>"
 build\Release\wasapi_bridge_probe.exe --default "<Speaker render ID>" "<MicArray1 capture ID>"
+build\Release\wasapi_bridge_probe.exe --route "<Speaker render ID>" "<downstream capture ID>"
 build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArray1 capture ID>"
 ```
 
 The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request
-RAW capture; `--default` uses ordinary shared-mode capture without RAW. It sends different
+RAW capture; `--default` and `--route` use ordinary shared-mode capture without RAW.
+`--route` accepts a 48 kHz mono or stereo float32 downstream capture endpoint
+and can test an external routing path, such as Speaker -> driver MicArray1 ->
+SAR matrix -> VB-Cable Input -> VB-Cable Output. Start SAR's route before this
+probe; do not open MicArray1 in the probe at the same time. It sends different
 tones on left and right for three seconds, records four seconds, then reports
 frame counts, silence flags, desired-tone power, and cross-channel power.
-Exit code 0 requires at least two seconds of capture, nontrivial tone energy,
-and 20 dB of cross-channel separation. This is a functional smoke test, not a
+Exit code 0 requires at least two seconds of capture and nontrivial tone energy.
+RAW modes also require 20 dB of cross-channel separation; `--route` requires
+signal on both downstream channels and rejects the sample's fixed 2 kHz tone.
+This is a functional smoke test, not a
 latency, xrun, clock-drift, or long-run stability certification. Save the full
 output and HRESULT on failure; do not substitute another endpoint silently.
 
