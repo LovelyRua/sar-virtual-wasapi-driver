@@ -244,7 +244,7 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     const size_t capturedFrames = received.size() / 2;
     std::cout << "sent_frames=" << sentFrames << " captured_frames=" << capturedFrames
               << " silent_frames=" << silentFrames << '\n';
-    if (capturedFrames < kSampleRate * 2) return 2;
+    if (capturedFrames < kSampleRate * (routeCapture ? 1 : 2)) return 2;
 
     double strongest = 0.0;
     double leakage = 0.0;

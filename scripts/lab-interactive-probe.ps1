@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory)] [string] $ProbePath,
     [Parameter(Mandatory)] [string] $RenderId,
     [Parameter(Mandatory)] [string] $CaptureId,
-    [ValidateSet('run', 'default', 'exclusive')] [string] $Mode = 'run',
+    [ValidateSet('run', 'default', 'exclusive', 'route')] [string] $Mode = 'run',
     [Parameter(Mandatory)] [string] $OutputPath
 )
 

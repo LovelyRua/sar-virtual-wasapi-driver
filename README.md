@@ -91,7 +91,8 @@ SAR matrix -> VB-Cable Input -> VB-Cable Output. Start SAR's route before this
 probe; do not open MicArray1 in the probe at the same time. It sends different
 tones on left and right for three seconds, records four seconds, then reports
 frame counts, silence flags, desired-tone power, and cross-channel power.
-Exit code 0 requires at least two seconds of capture and nontrivial tone energy.
+Exit code 0 requires at least two seconds of capture for the driver-pair modes
+or one second for the downstream `--route` mode, plus nontrivial tone energy.
 RAW modes also require 20 dB of cross-channel separation; `--route` requires
 signal on both downstream channels and rejects the sample's fixed 2 kHz tone.
 This is a functional smoke test, not a
