@@ -16,6 +16,9 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Endpoint inventory parser tests
+        shell: pwsh
+        run: ./scripts/lab-endpoint-inventory.tests.ps1
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch'
         with:

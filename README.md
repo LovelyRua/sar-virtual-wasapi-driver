@@ -31,6 +31,17 @@ endpoint pins are limited to one kernel stream because there is no mixer.
 The TabletAudioSample adapter currently activates only the Speaker render and
 MicArray1 capture miniport pair. Other upstream SysVAD miniport definitions and
 INF templates remain in the sample tree but are not activated by this adapter.
+After installation on the lab VM, run the inventory check in its logged-on
+desktop session:
+
+```powershell
+scripts/lab-endpoint-inventory.ps1 -ProbePath <wasapi_bridge_probe.exe>
+```
+
+It fails if the sample exposes anything other than this one render/capture pair;
+the optional `-ReportPath` writes the same JSON evidence to disk. Its parser
+has fixture tests in the Transport workflow. A passing build alone does not
+prove the installed endpoint inventory.
 
 The initial target is one paired stereo render/capture bus. The Windows app
 renders to the virtual render endpoint; SAR reads that stream with WASAPI

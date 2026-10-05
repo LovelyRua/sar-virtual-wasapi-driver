@@ -1,0 +1,39 @@
+$ErrorActionPreference = 'Stop'
+$checker = Join-Path $PSScriptRoot 'lab-endpoint-inventory.ps1'
+$shell = (Get-Process -Id $PID).Path
+$inventory = Join-Path ([IO.Path]::GetTempPath()) "sar-endpoints-$([guid]::NewGuid().ToString('N')).txt"
+$pair = @'
+Render endpoints:
+  Speakers (Virtual Audio Device (WDM) - Tablet Sample)
+    {0.0.0.00000000}.{11111111-1111-1111-1111-111111111111}
+  CABLE Input (VB-Audio Virtual Cable)
+    {0.0.0.00000000}.{22222222-2222-2222-2222-222222222222}
+Capture endpoints:
+  Internal Microphone Array - Front (Virtual Audio Device (WDM) - Tablet Sample)
+    {0.0.1.00000000}.{33333333-3333-3333-3333-333333333333}
+'@
+$extra = @'
+  Internal Microphone Array - Rear (Virtual Audio Device (WDM) - Tablet Sample)
+    {0.0.1.00000000}.{44444444-4444-4444-4444-444444444444}
+'@
+
+try {
+    foreach ($case in @(
+        @{ Name = 'pair'; Text = $pair; Passed = $true; Count = 2 },
+        @{ Name = 'extra'; Text = "$pair`n$extra"; Passed = $false; Count = 3 },
+        @{ Name = 'missing'; Text = $pair -replace 'Internal Microphone Array - Front', 'Other Microphone'; Passed = $false; Count = 2 }
+    )) {
+        Set-Content -LiteralPath $inventory -Value $case.Text -Encoding UTF8
+        $output = & $shell -NoProfile -File $checker -InventoryPath $inventory
+        $exit = $LASTEXITCODE
+        $report = ($output -join "`n") | ConvertFrom-Json
+        if ($report.Passed -ne $case.Passed -or
+            $report.SampleEndpointCount -ne $case.Count -or
+            $exit -ne [int](!$case.Passed)) {
+            throw "Inventory case '$($case.Name)' failed: exit=$exit report=$($output -join ' ')"
+        }
+    }
+    Write-Output 'lab_endpoint_inventory_tests passed=3'
+} finally {
+    Remove-Item -LiteralPath $inventory -ErrorAction SilentlyContinue
+}
