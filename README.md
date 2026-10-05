@@ -31,8 +31,9 @@ endpoint pins are limited to one kernel stream because there is no mixer.
 The TabletAudioSample adapter currently activates only the Speaker render and
 MicArray1 capture miniport pair. Other upstream SysVAD miniport definitions and
 INF templates remain in the sample tree but are not activated by this adapter.
-After installation on the lab VM, run the inventory check in its logged-on
-desktop session:
+After installation on the lab VM, run the inventory check from the desktop or
+WinRM. Endpoint enumeration is valid in Session 0; audio transfer probes still
+require a logged-on desktop session:
 
 ```powershell
 scripts/lab-endpoint-inventory.ps1 -ProbePath <wasapi_bridge_probe.exe>
@@ -185,6 +186,23 @@ device, not a production driver reliability or latency claim. After testing,
 the device, INF and temporary signing certificate were removed. VM24 was
 rebooted and verified with Secure Boot on, test signing off, and no remaining
 experimental device or lab certificate.
+
+## Endpoint pair retest (2026-10-05)
+
+CI artifact from commit `d8e3a7e` was installed on VM24 with a temporary lab
+signature. Session 0 enumeration found exactly one sample Speaker render and
+one MicArray1 Front capture endpoint; `lab-endpoint-inventory.ps1` passed with
+`SampleEndpointCount=2`. In the logged-on desktop session, the shared-mode
+Speaker-to-MicArray1 probe rendered 143808 frames and captured 191328 frames,
+with zero silent frames, target power 2.87847e16, fixed-tone power 1628.29,
+and `PROBE_EXIT=0`. This verifies the reduced endpoint inventory did not break
+the previously working functional audio path; it is not a longevity test.
+
+Afterward, the lab device and `oem10.inf` were removed, the temporary signing
+certificate was removed from My, Root, and TrustedPublisher, test signing was
+disabled, and Secure Boot was restored. Post-reboot checks found Secure Boot
+on, no sample device or INF, no matching certificate, and all firewall profiles
+enabled. The pre-test VM snapshot was retained.
 
 ## Exit criteria for the first SAR endpoint
 

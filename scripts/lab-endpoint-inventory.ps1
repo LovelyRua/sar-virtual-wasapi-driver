@@ -13,9 +13,6 @@ if ([bool]$ProbePath -eq [bool]$InventoryPath) {
 }
 
 if ($ProbePath) {
-    if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) {
-        throw 'Enumerate from a logged-on desktop session, not WinRM Session 0.'
-    }
     $probe = (Resolve-Path -LiteralPath $ProbePath).Path
     $lines = @(& $probe --list 2>&1 | ForEach-Object { [string]$_ })
     if ($LASTEXITCODE -ne 0) { throw "Endpoint probe exited with code $LASTEXITCODE." }
