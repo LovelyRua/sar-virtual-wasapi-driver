@@ -37,3 +37,4 @@ try {
 } finally {
     Remove-Item -LiteralPath $inventory -ErrorAction SilentlyContinue
 }
+exit 0
