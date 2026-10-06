@@ -1576,6 +1576,10 @@ ByteDisplacement - # of bytes to process.
                 m_pMiniport->GetAdapterCommObj()->BridgeRead(m_pDmaBuffer + bufferOffset, runWrite);
             }
         }
+        else if (m_pMiniport->GetDeviceType() == eMicArrayDevice1)
+        {
+            RtlZeroMemory(m_pDmaBuffer + bufferOffset, runWrite);
+        }
         else
         {
             m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);

@@ -28,6 +28,9 @@ clocks, expose SAR-branded endpoints, or provide production diagnostics. The
 paired endpoints still require real Windows playback/capture testing.
 The sample Speaker default is 48 kHz for this experiment, and both bridge
 endpoint pins are limited to one kernel stream because there is no mixer.
+If MicArray1 negotiates a format outside the bridge's supported PCM layouts,
+its capture buffer is silent rather than falling back to SysVAD's synthetic
+tone. Silence is a failure to route, not evidence of successful audio transfer.
 The TabletAudioSample adapter currently activates only the Speaker render and
 MicArray1 capture miniport pair. Other upstream SysVAD miniport definitions and
 INF templates remain in the sample tree but are not activated by this adapter.
