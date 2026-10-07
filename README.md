@@ -20,23 +20,26 @@ primitive with standalone tests. The experimental bridge uses it in the
 kernel stream callbacks. Passing its unit tests or the driver build does not
 prove endpoint audio transfer.
 
-The bridge currently connects the sample Speaker render stream to MicArray1
-RAW capture when both negotiate 48 kHz, 16-bit stereo PCM. It uses a fixed
-4096-frame ring in nonpaged adapter storage and emits silence on an empty
-read. It does not resample, mix simultaneous clients, synchronize independent
-clocks, expose SAR-branded endpoints, or provide production diagnostics. The
-paired endpoints still require real Windows playback/capture testing.
+The bridge currently connects Speaker render to MicArray1 capture and
+SpeakerHeadphone render to MicArray2 capture as two isolated experimental
+buses. Each uses a fixed 4096-frame ring in nonpaged adapter storage and emits
+silence on an empty read. The bridge accepts 48 kHz, 16-bit stereo PCM render
+and 48 kHz, 16-bit mono or stereo PCM capture. It does not resample, mix
+simultaneous clients, synchronize independent clocks, or provide production
+diagnostics. The second bus and cross-bus isolation still require real Windows
+playback/capture testing.
 The sample Speaker default is 48 kHz for this experiment, and both bridge
 endpoint pins are limited to one kernel stream because there is no mixer.
 If MicArray1 negotiates a format outside the bridge's supported PCM layouts,
 its capture buffer is silent rather than falling back to SysVAD's synthetic
 tone. Silence is a failure to route, not evidence of successful audio transfer.
-The TabletAudioSample adapter currently activates only the Speaker render and
-MicArray1 capture miniport pair. Other upstream SysVAD miniport definitions and
-INF templates remain in the sample tree but are not activated by this adapter.
-The installed PnP device is labeled `System Audio Route Experimental Bus 1`;
-its capture endpoint is `SAR Experimental Capture 1`. These labels distinguish
-the lab bus from physical microphones and from a release-ready SAR driver.
+The TabletAudioSample adapter currently activates only the Speaker/MicArray1
+and SpeakerHeadphone/MicArray2 miniport pairs. Other upstream SysVAD miniport
+definitions and INF templates remain in the sample tree but are not activated
+by this adapter. The installed PnP device is labeled `System Audio Route
+Experimental`; its capture endpoints are `SAR Experimental Capture 1` and
+`SAR Experimental Capture 2`. These labels distinguish the lab buses from
+physical microphones and from a release-ready SAR driver.
 After installation on the lab VM, run the inventory check from the desktop or
 WinRM. Endpoint enumeration is valid in Session 0; audio transfer probes still
 require a logged-on desktop session:
@@ -45,18 +48,16 @@ require a logged-on desktop session:
 scripts/lab-endpoint-inventory.ps1 -ProbePath <wasapi_bridge_probe.exe>
 ```
 
-It fails if the sample exposes anything other than this one render/capture pair;
+It fails if the sample exposes anything other than these two render/capture pairs;
 the optional `-ReportPath` writes the same JSON evidence to disk. Its parser
 has fixture tests in the Transport workflow. A passing build alone does not
 prove the installed endpoint inventory.
 
-The initial target is one paired stereo render/capture bus. The Windows app
-renders to the virtual render endpoint; SAR reads that stream with WASAPI
-loopback. For the reverse direction, SAR renders to a second virtual render
-endpoint and the driver supplies its paired capture endpoint to applications.
-This second path requires actual driver-side transfer code; the upstream
-sample's generated capture tone is not sufficient. Multiple independent buses
-and channel counts come after one bus passes bit-exact and long-run tests.
+The first bus accepts ordinary Windows playback; SAR reads its paired capture
+endpoint. For the reverse direction, SAR renders to the second bus and ordinary
+applications read its paired capture endpoint. Both buses must pass independent
+signal and cross-bus silence tests before this is considered a functional
+two-direction path. Dynamic bus counts and channel layouts remain future work.
 
 ## Build boundary
 

@@ -85,9 +85,9 @@ class CAdapterCommon :
         PCSYSVADHW              m_pHW;                  // Virtual SYSVAD HW object
         PPORTCLSETWHELPER       m_pPortClsEtwHelper;
 
-        KSPIN_LOCK              m_BridgeLock;
-        BYTE                    m_BridgeStorage[4096 * 4];
-        sar_driver::PcmFrameRing m_BridgeRing;
+        KSPIN_LOCK              m_BridgeLock[2];
+        BYTE                    m_BridgeStorage[2][4096 * 4];
+        sar_driver::PcmFrameRing m_BridgeRing[2];
 
         static LONG             m_AdapterInstances;     // # of adapter objects.
 
@@ -128,11 +128,13 @@ class CAdapterCommon :
         
         STDMETHODIMP_(WDFDEVICE)        GetWdfDevice(void);
 
-        STDMETHODIMP_(VOID) BridgeWrite(_In_reads_bytes_(Bytes) const BYTE* Data,
+        STDMETHODIMP_(VOID) BridgeWrite(_In_ ULONG Bus,
+                                       _In_reads_bytes_(Bytes) const BYTE* Data,
                                        _In_ ULONG Bytes);
-        STDMETHODIMP_(VOID) BridgeRead(_Out_writes_bytes_(Bytes) BYTE* Data,
+        STDMETHODIMP_(VOID) BridgeRead(_In_ ULONG Bus,
+                                      _Out_writes_bytes_(Bytes) BYTE* Data,
                                       _In_ ULONG Bytes);
-        STDMETHODIMP_(VOID) BridgeReset(void);
+        STDMETHODIMP_(VOID) BridgeReset(_In_ ULONG Bus);
 
         STDMETHODIMP_(void)     SetWaveServiceGroup
         (   
@@ -751,37 +753,38 @@ Return Value:
 //=============================================================================
 #pragma code_seg()
 STDMETHODIMP_(VOID)
-CAdapterCommon::BridgeWrite(_In_reads_bytes_(Bytes) const BYTE* Data, _In_ ULONG Bytes)
+CAdapterCommon::BridgeWrite(_In_ ULONG Bus, _In_reads_bytes_(Bytes) const BYTE* Data, _In_ ULONG Bytes)
 {
-    if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0) return;
+    if (Bus >= 2 || Data == NULL || Bytes == 0 || (Bytes % 4) != 0) return;
     KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock, &oldIrql);
-    m_BridgeRing.Write(Data, Bytes / 4);
-    KeReleaseSpinLock(&m_BridgeLock, oldIrql);
+    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    m_BridgeRing[Bus].Write(Data, Bytes / 4);
+    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 STDMETHODIMP_(VOID)
-CAdapterCommon::BridgeRead(_Out_writes_bytes_(Bytes) BYTE* Data, _In_ ULONG Bytes)
+CAdapterCommon::BridgeRead(_In_ ULONG Bus, _Out_writes_bytes_(Bytes) BYTE* Data, _In_ ULONG Bytes)
 {
     if (Data == NULL || Bytes == 0) return;
-    if ((Bytes % 4) != 0)
+    if (Bus >= 2 || (Bytes % 4) != 0)
     {
         RtlZeroMemory(Data, Bytes);
         return;
     }
     KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock, &oldIrql);
-    m_BridgeRing.Read(Data, Bytes / 4);
-    KeReleaseSpinLock(&m_BridgeLock, oldIrql);
+    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    m_BridgeRing[Bus].Read(Data, Bytes / 4);
+    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 STDMETHODIMP_(VOID)
-CAdapterCommon::BridgeReset(void)
+CAdapterCommon::BridgeReset(_In_ ULONG Bus)
 {
+    if (Bus >= 2) return;
     KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock, &oldIrql);
-    m_BridgeRing.Reset();
-    KeReleaseSpinLock(&m_BridgeLock, oldIrql);
+    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    m_BridgeRing[Bus].Reset();
+    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 //=============================================================================
@@ -835,10 +838,13 @@ Return Value:
     m_PowerState            = PowerDeviceD0;
     m_pHW                   = NULL;
     m_pPortClsEtwHelper     = NULL;
-    KeInitializeSpinLock(&m_BridgeLock);
-    if (!m_BridgeRing.Initialize(m_BridgeStorage, 4096, 4))
+    for (ULONG bus = 0; bus < 2; ++bus)
     {
-        return STATUS_INSUFFICIENT_RESOURCES;
+        KeInitializeSpinLock(&m_BridgeLock[bus]);
+        if (!m_BridgeRing[bus].Initialize(m_BridgeStorage[bus], 4096, 4))
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
     }
 
     InitializeListHead(&m_SubdeviceCache);

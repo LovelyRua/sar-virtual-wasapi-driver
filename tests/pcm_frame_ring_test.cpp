@@ -45,5 +45,18 @@ int main() {
     CHECK(ring.silent_frames() == 1);
     CHECK(ring.Write(nullptr, 1).accepted_frames == 0);
     CHECK(ring.queued_frames() == 0);
+
+    uint8_t bus_storage[2][8] = {};
+    PcmFrameRing buses[2];
+    CHECK(buses[0].Initialize(bus_storage[0], 4, 2));
+    CHECK(buses[1].Initialize(bus_storage[1], 4, 2));
+    const uint8_t bus_one_frame[] = {21, 22};
+    CHECK(buses[0].Write(first, 1).accepted_frames == 1);
+    CHECK(buses[1].Write(bus_one_frame, 1).accepted_frames == 1);
+    buses[0].Reset();
+    CHECK(buses[0].Read(output, 1) == 0);
+    CHECK(output[0] == 0 && output[1] == 0);
+    CHECK(buses[1].Read(output, 1) == 1);
+    CHECK(output[0] == 21 && output[1] == 22);
     return 0;
 }

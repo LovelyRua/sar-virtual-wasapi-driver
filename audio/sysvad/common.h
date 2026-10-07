@@ -472,6 +472,7 @@ DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
     STDMETHOD_(VOID, BridgeWrite)
     (
         THIS_
+        _In_ ULONG Bus,
         _In_reads_bytes_(Bytes) const BYTE* Data,
         _In_ ULONG Bytes
     ) PURE;
@@ -479,11 +480,12 @@ DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
     STDMETHOD_(VOID, BridgeRead)
     (
         THIS_
+        _In_ ULONG Bus,
         _Out_writes_bytes_(Bytes) BYTE* Data,
         _In_ ULONG Bytes
     ) PURE;
 
-    STDMETHOD_(VOID, BridgeReset)(THIS) PURE;
+    STDMETHOD_(VOID, BridgeReset)(THIS_ _In_ ULONG Bus) PURE;
 
     STDMETHOD_(VOID,            SetWaveServiceGroup) 
     ( 

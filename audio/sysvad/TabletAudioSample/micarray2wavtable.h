@@ -29,7 +29,7 @@ Abstract:
 //
 // Max # of pin instances.
 //
-#define MICARRAY2_MAX_INPUT_STREAMS              4
+#define MICARRAY2_MAX_INPUT_STREAMS              1
 
 //=============================================================================
 static 

@@ -41,18 +41,28 @@ for ($i = 0; $i -lt $lines.Count; ++$i) {
 }
 
 $sample = @($endpoints | Where-Object {
-    $_.Name -like '*System Audio Route Experimental Bus 1*'
+    $_.Name -like '*System Audio Route Experimental*'
 })
 $speaker = @($sample | Where-Object {
     $_.Direction -eq 'render' -and
-    $_.Name -eq 'Speakers (System Audio Route Experimental Bus 1)'
+    $_.Name -eq 'Speakers (System Audio Route Experimental)'
+})
+$headphone = @($sample | Where-Object {
+    $_.Direction -eq 'render' -and
+    $_.Name -eq 'Headphones (System Audio Route Experimental)'
 })
 $microphone = @($sample | Where-Object {
     $_.Direction -eq 'capture' -and
-    $_.Name -eq 'SAR Experimental Capture 1 (System Audio Route Experimental Bus 1)'
+    $_.Name -eq 'SAR Experimental Capture 1 (System Audio Route Experimental)'
 })
-$passed = $sample.Count -eq 2 -and $speaker.Count -eq 1 -and
-          $microphone.Count -eq 1 -and $speaker[0].Id -ne $microphone[0].Id
+$microphone2 = @($sample | Where-Object {
+    $_.Direction -eq 'capture' -and
+    $_.Name -eq 'SAR Experimental Capture 2 (System Audio Route Experimental)'
+})
+$passed = $sample.Count -eq 4 -and $speaker.Count -eq 1 -and
+          $headphone.Count -eq 1 -and $microphone.Count -eq 1 -and
+          $microphone2.Count -eq 1 -and
+          @($sample | Select-Object -ExpandProperty Id -Unique).Count -eq 4
 $report = [pscustomobject]@{
     Passed = $passed
     ActiveEndpointCount = $endpoints.Count

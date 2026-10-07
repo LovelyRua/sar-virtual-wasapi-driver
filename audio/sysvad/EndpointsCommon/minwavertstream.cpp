@@ -1213,7 +1213,7 @@ NTSTATUS CMiniportWaveRTStream::SetState
 
             if (IsBridgeRender() || IsBridgeCapture())
             {
-                pAdapterComm->BridgeReset();
+                pAdapterComm->BridgeReset(BridgeBus());
             }
 
             // Wait until all work items are completed.
@@ -1410,13 +1410,16 @@ BOOLEAN CMiniportWaveRTStream::IsBridgeFormat() const
 BOOLEAN CMiniportWaveRTStream::IsBridgeRender() const
 {
     return !m_bCapture && IsBridgeFormat() &&
-           m_pMiniport->GetDeviceType() == eSpeakerDevice &&
+           (m_pMiniport->GetDeviceType() == eSpeakerDevice ||
+            m_pMiniport->GetDeviceType() == eSpeakerHpDevice) &&
            !m_pMiniport->IsOffloadPin(m_ulPin);
 }
 
 BOOLEAN CMiniportWaveRTStream::IsBridgeCapture() const
 {
-    if (!m_bCapture || m_pMiniport->GetDeviceType() != eMicArrayDevice1 ||
+    if (!m_bCapture ||
+        (m_pMiniport->GetDeviceType() != eMicArrayDevice1 &&
+         m_pMiniport->GetDeviceType() != eMicArrayDevice2) ||
         m_pWfExt == NULL) return FALSE;
     const WAVEFORMATEX& format = m_pWfExt->Format;
     return format.wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
@@ -1424,6 +1427,12 @@ BOOLEAN CMiniportWaveRTStream::IsBridgeCapture() const
            ((format.nChannels == 1 && format.nBlockAlign == 2) ||
             (format.nChannels == 2 && format.nBlockAlign == 4)) &&
            IsEqualGUID(m_pWfExt->SubFormat, KSDATAFORMAT_SUBTYPE_PCM);
+}
+
+ULONG CMiniportWaveRTStream::BridgeBus() const
+{
+    const auto type = m_pMiniport->GetDeviceType();
+    return type == eSpeakerHpDevice || type == eMicArrayDevice2 ? 1 : 0;
 }
 
 //=============================================================================
@@ -1560,7 +1569,7 @@ ByteDisplacement - # of bytes to process.
                 {
                     const ULONG frames = min(framesRemaining, 256UL);
                     m_pMiniport->GetAdapterCommObj()->BridgeRead(
-                        reinterpret_cast<BYTE*>(stereo), frames * 2 * sizeof(SHORT));
+                        BridgeBus(), reinterpret_cast<BYTE*>(stereo), frames * 2 * sizeof(SHORT));
                     SHORT* mono = reinterpret_cast<SHORT*>(output);
                     for (ULONG frame = 0; frame < frames; ++frame)
                     {
@@ -1573,10 +1582,12 @@ ByteDisplacement - # of bytes to process.
             }
             else
             {
-                m_pMiniport->GetAdapterCommObj()->BridgeRead(m_pDmaBuffer + bufferOffset, runWrite);
+                m_pMiniport->GetAdapterCommObj()->BridgeRead(
+                    BridgeBus(), m_pDmaBuffer + bufferOffset, runWrite);
             }
         }
-        else if (m_pMiniport->GetDeviceType() == eMicArrayDevice1)
+        else if (m_pMiniport->GetDeviceType() == eMicArrayDevice1 ||
+                 m_pMiniport->GetDeviceType() == eMicArrayDevice2)
         {
             RtlZeroMemory(m_pDmaBuffer + bufferOffset, runWrite);
         }
@@ -1616,7 +1627,8 @@ ByteDisplacement - # of bytes to process.
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
         if (IsBridgeRender())
         {
-            m_pMiniport->GetAdapterCommObj()->BridgeWrite(m_pDmaBuffer + bufferOffset, runWrite);
+            m_pMiniport->GetAdapterCommObj()->BridgeWrite(
+                BridgeBus(), m_pDmaBuffer + bufferOffset, runWrite);
         }
         else
         {

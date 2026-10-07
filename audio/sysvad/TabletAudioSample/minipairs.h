@@ -510,6 +510,7 @@ static
 PENDPOINT_MINIPAIR  g_RenderEndpoints[] = 
 {
     &SpeakerMiniports,
+    &SpeakerHpMiniports,
 };
 
 #define g_cRenderEndpoints  (SIZEOF_ARRAY(g_RenderEndpoints))
@@ -522,6 +523,7 @@ static
 PENDPOINT_MINIPAIR  g_CaptureEndpoints[] = 
 {
     &MicArray1Miniports,
+    &MicArray2Miniports,
 };
 
 #define g_cCaptureEndpoints (SIZEOF_ARRAY(g_CaptureEndpoints))
