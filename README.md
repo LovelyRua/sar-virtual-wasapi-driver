@@ -220,8 +220,10 @@ evidence for one endpoint pair, not latency or sustained-reliability evidence.
 
 VM24 is now a dedicated driver lab with Secure Boot disabled and Windows test
 signing enabled by explicit user authorization. Its firewall profiles remain
-enabled. The experimental sample device remains installed there for follow-up
-tests; this configuration is not suitable for release acceptance or production.
+enabled. After this run, the sample device, OEM INF, and seven-day temporary
+signing identity were removed; the boot test mode remains for faster follow-up
+installations. This configuration is not suitable for release acceptance or
+production.
 
 ## Exit criteria for the first SAR endpoint
 
