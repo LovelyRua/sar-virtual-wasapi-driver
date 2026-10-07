@@ -41,15 +41,15 @@ for ($i = 0; $i -lt $lines.Count; ++$i) {
 }
 
 $sample = @($endpoints | Where-Object {
-    $_.Name -like '*Virtual Audio Device (WDM) - Tablet Sample*'
+    $_.Name -like '*System Audio Route Experimental Bus 1*'
 })
 $speaker = @($sample | Where-Object {
     $_.Direction -eq 'render' -and
-    $_.Name -eq 'Speakers (Virtual Audio Device (WDM) - Tablet Sample)'
+    $_.Name -eq 'Speakers (System Audio Route Experimental Bus 1)'
 })
 $microphone = @($sample | Where-Object {
     $_.Direction -eq 'capture' -and
-    $_.Name -eq 'Internal Microphone Array - Front (Virtual Audio Device (WDM) - Tablet Sample)'
+    $_.Name -eq 'SAR Experimental Capture 1 (System Audio Route Experimental Bus 1)'
 })
 $passed = $sample.Count -eq 2 -and $speaker.Count -eq 1 -and
           $microphone.Count -eq 1 -and $speaker[0].Id -ne $microphone[0].Id
