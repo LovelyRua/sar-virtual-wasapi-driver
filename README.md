@@ -207,6 +207,22 @@ disabled, and Secure Boot was restored. Post-reboot checks found Secure Boot
 on, no sample device or INF, no matching certificate, and all firewall profiles
 enabled. The pre-test VM snapshot was retained.
 
+## SAR matrix signal gate (2026-10-07)
+
+VM24 installed the `6df4544` driver CI artifact with a temporary lab catalog
+signature. The interactive SAR matrix preflight routed the sample Speaker
+render through MicArray1 capture, SAR, and VB-Cable. With the matrix route
+enabled, both captured channels had target power 1.99771e16 and SAR processed
+2935 blocks. With the route omitted, both channel powers were exactly zero
+while SAR processed 2690 blocks. Both probes exited successfully, and the
+owned engine service stopped after each run. This is functional end-to-end
+evidence for one endpoint pair, not latency or sustained-reliability evidence.
+
+VM24 is now a dedicated driver lab with Secure Boot disabled and Windows test
+signing enabled by explicit user authorization. Its firewall profiles remain
+enabled. The experimental sample device remains installed there for follow-up
+tests; this configuration is not suitable for release acceptance or production.
+
 ## Exit criteria for the first SAR endpoint
 
 - Device Manager and WASAPI enumerate the SAR-named render/capture endpoints.
