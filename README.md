@@ -228,6 +228,15 @@ signing identity were removed; the boot test mode remains for faster follow-up
 installations. This configuration is not suitable for release acceptance or
 production.
 
+The renamed lab package at `c68a9cc` passed the same Windows 11 VM24
+installation and endpoint checks: PnP reported `System Audio Route Experimental
+Bus 1` as healthy, and WASAPI enumerated exactly its Speaker render and
+`SAR Experimental Capture 1` endpoints. An interactive shared-mode probe
+rendered 143328 frames and captured 189888 non-silent frames with exit code 0.
+The SAR matrix route to VB-Cable then processed 2685 blocks; both output
+channels had target power 1.61923e16. The sample device, OEM INF, and temporary
+signing identity were removed again; the authorized boot test mode remains.
+
 ## Exit criteria for the first SAR endpoint
 
 - Device Manager and WASAPI enumerate the SAR-named render/capture endpoints.
