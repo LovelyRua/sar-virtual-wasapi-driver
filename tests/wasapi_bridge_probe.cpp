@@ -148,20 +148,31 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     const bool defaultCapture = !rawCapture && !exclusive;
     WAVEFORMATEX* captureMixFormat = nullptr;
     UINT32 captureMixFormatChannels = 0;
+    bool captureMixFloat = false;
     if (defaultCapture) {
         Check(capture->GetMixFormat(&captureMixFormat), "Get capture mix format");
+        const bool extensible = captureMixFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+                                captureMixFormat->cbSize >=
+                                    sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        captureMixFloat = captureMixFormat->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+                          (extensible &&
+                           IsEqualGUID(reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(captureMixFormat)->SubFormat,
+                                       KSDATAFORMAT_SUBTYPE_IEEE_FLOAT));
+        const bool captureMixPcm16 = captureMixFormat->wFormatTag == WAVE_FORMAT_PCM ||
+                                     (extensible &&
+                                      IsEqualGUID(reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(captureMixFormat)->SubFormat,
+                                                  KSDATAFORMAT_SUBTYPE_PCM));
         if ((captureMixFormat->nChannels != 1 && captureMixFormat->nChannels != 2) ||
-            (routeCapture && captureMixFormat->nChannels != 2) ||
             captureMixFormat->nSamplesPerSec != kSampleRate ||
-            captureMixFormat->wBitsPerSample != 32 ||
-            !(captureMixFormat->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
-              (captureMixFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
-               IsEqualGUID(reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(captureMixFormat)->SubFormat,
-                           KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)))) {
+            !((captureMixFloat && captureMixFormat->wBitsPerSample == 32 &&
+               captureMixFormat->nBlockAlign == captureMixFormat->nChannels * 4) ||
+              (captureMixPcm16 && captureMixFormat->wBitsPerSample == 16 &&
+               captureMixFormat->nBlockAlign == captureMixFormat->nChannels * 2))) {
             CoTaskMemFree(captureMixFormat);
-            throw std::runtime_error("Capture mix format is not 48 kHz float32 mono/stereo");
+            throw std::runtime_error("Capture mix format is not 48 kHz float32 or PCM16 mono/stereo");
         }
         captureMixFormatChannels = captureMixFormat->nChannels;
+        std::cout << "capture_mix_channels=" << captureMixFormatChannels << '\n';
     }
     const auto shareMode = exclusive ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
     const REFERENCE_TIME period = exclusive ? 200000 : 0;
@@ -218,14 +229,18 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
                 silentFrames += frames;
             } else {
                 if (defaultCapture) {
-                    const auto* input = reinterpret_cast<const float*>(bytes);
                     for (UINT32 frame = 0; frame < frames; ++frame) {
                         for (UINT32 channel = 0; channel < 2; ++channel) {
-                            const float value = input[frame * captureMixFormatChannels +
-                                                      std::min(channel, captureMixFormatChannels - 1)];
-                            received.push_back(static_cast<int16_t>(
-                                std::clamp(std::isfinite(value) ? value : 0.0f,
-                                           -1.0f, 1.0f) * 32767));
+                            const size_t index = frame * captureMixFormatChannels +
+                                                 std::min(channel, captureMixFormatChannels - 1);
+                            if (captureMixFloat) {
+                                const float value = reinterpret_cast<const float*>(bytes)[index];
+                                received.push_back(static_cast<int16_t>(
+                                    std::clamp(std::isfinite(value) ? value : 0.0f,
+                                               -1.0f, 1.0f) * 32767));
+                            } else {
+                                received.push_back(reinterpret_cast<const int16_t*>(bytes)[index]);
+                            }
                         }
                     }
                 } else {
