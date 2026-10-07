@@ -26,8 +26,8 @@ buses. Each uses a fixed 4096-frame ring in nonpaged adapter storage and emits
 silence on an empty read. The bridge accepts 48 kHz, 16-bit stereo PCM render
 and 48 kHz, 16-bit mono or stereo PCM capture. It does not resample, mix
 simultaneous clients, synchronize independent clocks, or provide production
-diagnostics. The second bus and cross-bus isolation still require real Windows
-playback/capture testing.
+diagnostics. Both buses and cross-bus isolation passed short Windows lab
+playback/capture probes; see the dated result below.
 The sample Speaker default is 48 kHz for this experiment, and both bridge
 endpoint pins are limited to one kernel stream because there is no mixer.
 If MicArray1 negotiates a format outside the bridge's supported PCM layouts,
@@ -55,9 +55,9 @@ prove the installed endpoint inventory.
 
 The first bus accepts ordinary Windows playback; SAR reads its paired capture
 endpoint. For the reverse direction, SAR renders to the second bus and ordinary
-applications read its paired capture endpoint. Both buses must pass independent
-signal and cross-bus silence tests before this is considered a functional
-two-direction path. Dynamic bus counts and channel layouts remain future work.
+applications read its paired capture endpoint. Both buses passed independent
+signal and cross-bus silence tests on VM24. Dynamic bus counts and channel
+layouts remain future work.
 
 ## Build boundary
 
@@ -249,4 +249,32 @@ signing identity were removed again; the authorized boot test mode remains.
 - Tests cover silence, clipping, sustained playback, simultaneous clients,
   restart, and device disable/enable on the driver lab.
 
-No milestone above is claimed complete by this initial import.
+The short functional signal path is verified on the lab VM. The remaining
+reliability, timing, format, multi-client, and uninstall criteria are not met.
+
+## Two-bus matrix lab result (2026-10-07)
+
+The Windows CI artifact from `8278ef0` was test-signed and installed only on
+VM24. The inventory check found exactly two render and two capture endpoints:
+Speaker/Capture 1 and Headphones/Capture 2. Direct interactive WASAPI probes
+passed on both paired buses. Both cross-bus probes measured zero target and
+fixed-tone power, confirming that the kernel bridge did not leak audio across
+the buses.
+
+The SAR matrix preflight then used the PCM16-capable probe from `7d484c8` to
+test the full route without VB-Cable. Speaker -> Capture 1 -> SAR -> Headphones
+-> Capture 2 passed with 725 processed blocks and target power 2.44832e16.
+Omitting the SAR route still processed 757 blocks but yielded zero target and
+second-channel power. The reverse Headphones -> Capture 2 -> SAR -> Speaker ->
+Capture 1 route passed with 1268 processed blocks and target power 3.01272e15.
+Each preflight observed the engine for three seconds. The capture endpoints
+negotiated mono in these probes, so duplicated analysis values do not verify
+stereo channel independence. These results establish functional signal flow
+and route control, not sustained glitch-free operation, latency, drift,
+multi-client behavior, or release readiness.
+
+After testing, VM24's experimental device and `oem10.inf` were removed. The
+temporary signing certificate was removed from My, Root, and TrustedPublisher;
+checks found no remaining sample device, INF, or matching certificate. All
+firewall profiles remained enabled. The user-authorized lab boot mode remains
+on (Secure Boot off, test signing on).
