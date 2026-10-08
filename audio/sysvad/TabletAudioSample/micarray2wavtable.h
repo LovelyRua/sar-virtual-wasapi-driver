@@ -36,7 +36,7 @@ static
 KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArray2PinSupportedDeviceFormats[] =
 {
     // 0 - Note the ENDPOINT_MINIPAIR structures for the mic arrays use this first element as the proposed DEFAULT format
-    // 48 KHz 16-bit mono
+    // 48 KHz 16-bit stereo for the experimental bridge default
     {
         {
             sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
@@ -50,15 +50,15 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArray2PinSupportedDeviceFormats[] =
         {
             {
                 WAVE_FORMAT_EXTENSIBLE,
-                1,
-                48000,
-                96000,
                 2,
+                48000,
+                192000,
+                4,
                 16,
                 sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
             },
             16,
-            KSAUDIO_SPEAKER_MONO,
+            KSAUDIO_SPEAKER_STEREO,
             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
         }
     },
@@ -547,7 +547,7 @@ KSDATARANGE_AUDIO MicArray2PinDataRangesProcessedStream[] =
             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
-        MICARRAY2_PROCESSED_CHANNELS,
+        MICARRAY2_DEVICE_MAX_CHANNELS,
         MICARRAY2_16_BITS_PER_SAMPLE_PCM,
         MICARRAY2_16_BITS_PER_SAMPLE_PCM,
         MICARRAY2_PROCESSED_MAX_SAMPLE_RATE,

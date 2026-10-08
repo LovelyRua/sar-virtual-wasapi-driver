@@ -115,7 +115,7 @@ double TonePower(const std::vector<int16_t>& samples, size_t startFrame,
 }
 
 int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t* captureId,
-        bool exclusive, bool rawCapture, bool routeCapture = false) {
+        bool exclusive, bool rawCapture, bool routeCapture = false, bool stereoCapture = false) {
     ComPtr<IMMDevice> renderDevice;
     ComPtr<IMMDevice> captureDevice;
     Check(enumerator->GetDevice(renderId, &renderDevice), "Get render device");
@@ -173,6 +173,10 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
         }
         captureMixFormatChannels = captureMixFormat->nChannels;
         std::cout << "capture_mix_channels=" << captureMixFormatChannels << '\n';
+        if (stereoCapture && captureMixFormatChannels != 2) {
+            CoTaskMemFree(captureMixFormat);
+            throw std::runtime_error("Stereo capture requires a two-channel default mix format");
+        }
     }
     const auto shareMode = exclusive ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
     const REFERENCE_TIME period = exclusive ? 200000 : 0;
@@ -267,21 +271,21 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     for (size_t start = 0; start + kSampleRate <= capturedFrames; start += kSampleRate / 2) {
         const double first = TonePower(received, start, kSampleRate, 0, 997);
         const double second = TonePower(received, start, kSampleRate,
-                                        defaultCapture ? 0 : 1, 1501);
+                                        defaultCapture && !stereoCapture ? 0 : 1, 1501);
         if (first + second > strongest) {
             strongest = first + second;
             if (routeCapture) {
                 secondChannelPower = TonePower(received, start, kSampleRate, 1, 997)
                                    + TonePower(received, start, kSampleRate, 1, 1501);
             }
-            leakage = defaultCapture
+            leakage = defaultCapture && !stereoCapture
                 ? TonePower(received, start, kSampleRate, 0, 2000)
                 : TonePower(received, start, kSampleRate, 0, 1501)
                     + TonePower(received, start, kSampleRate, 1, 997);
         }
     }
     std::cout << "target_power=" << strongest
-              << (defaultCapture ? " fixed_tone_power=" : " cross_channel_power=")
+              << (defaultCapture && !stereoCapture ? " fixed_tone_power=" : " cross_channel_power=")
               << leakage << '\n';
     if (routeCapture) std::cout << "second_channel_power=" << secondChannelPower << '\n';
     if (strongest < 1e12 || strongest < leakage * 100.0) return 3;
@@ -308,6 +312,8 @@ int wmain(int argc, wchar_t** argv) {
             return Run(enumerator.Get(), argv[2], argv[3], false, true);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--default") {
             return Run(enumerator.Get(), argv[2], argv[3], false, false);
+        } else if (argc == 4 && std::wstring(argv[1]) == L"--stereo") {
+            return Run(enumerator.Get(), argv[2], argv[3], false, false, false, true);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--route") {
             return Run(enumerator.Get(), argv[2], argv[3], false, false, true);
         } else if (argc == 4 && std::wstring(argv[1]) == L"--exclusive") {
@@ -315,6 +321,7 @@ int wmain(int argc, wchar_t** argv) {
         } else {
             std::wcerr << L"Usage: wasapi_bridge_probe --list | --run <render-id> <capture-id>"
                           L" | --default <render-id> <capture-id>"
+                          L" | --stereo <render-id> <capture-id>"
                           L" | --route <source-render-id> <downstream-capture-id>"
                           L" | --exclusive <render-id> <capture-id>\n";
             return 1;
