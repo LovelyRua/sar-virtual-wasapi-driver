@@ -3,6 +3,7 @@
 #include "wasapi_inventory.h"
 
 #include <audioclient.h>
+#include <propkeydef.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
