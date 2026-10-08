@@ -299,8 +299,8 @@ void print_readiness_json(const sar::devices::InstanceReadiness& readiness) {
                << L",\"capture\":" << counts.capture
                << L",\"captureActive\":" << counts.capture_active
                << L",\"captureWithFormat\":" << counts.capture_with_format << L'}'
-               << L",\"unassociatedSystemEndpoints\":"
-               << readiness.unassociated_endpoint_count
+               << L",\"activeUnassociatedSystemEndpoints\":"
+               << readiness.active_unassociated_endpoint_count
                << L",\"stableSamples\":" << readiness.stable_samples
                << L",\"inventoryHresult\":"
                << static_cast<unsigned long>(readiness.inventory_error)
@@ -331,8 +331,8 @@ void print_readiness(const sar::devices::InstanceReadiness& readiness) {
                << counts.capture << L" present / " << counts.capture_with_format
                << L" with mix format; expected "
                << sar::devices::kCaptureEndpointsPerInstance << L'\n'
-               << L"  system endpoints without a parent mapping: "
-               << readiness.unassociated_endpoint_count << L'\n'
+               << L"  active system endpoints without a parent mapping: "
+               << readiness.active_unassociated_endpoint_count << L'\n'
                << L"  consecutive ready samples: " << readiness.stable_samples << L" / "
                << sar::devices::kStableReadinessSamples << L'\n'
                << L"  diagnosis: " << sar::devices::readiness_hint(readiness.state) << L'\n';

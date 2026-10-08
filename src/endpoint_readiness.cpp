@@ -40,7 +40,7 @@ ReadinessState classify(const InstanceReadiness& readiness) {
     const bool complete_render = counts.render == kRenderEndpointsPerInstance;
     const bool complete_capture = counts.capture == kCaptureEndpointsPerInstance;
     if ((!complete_render || !complete_capture) &&
-        readiness.unassociated_endpoint_count != 0) {
+        readiness.active_unassociated_endpoint_count != 0) {
         return ReadinessState::endpoint_parent_unavailable;
     }
     if (counts.render > kRenderEndpointsPerInstance ||
@@ -102,8 +102,9 @@ HRESULT inspect_instance_readiness(const std::wstring& instance_id,
     }
 
     for (auto& endpoint : endpoints) {
-        if (FAILED(endpoint.parent_lookup_error)) {
-            ++readiness.unassociated_endpoint_count;
+        if (endpoint.state == DEVICE_STATE_ACTIVE &&
+            FAILED(endpoint.parent_lookup_error)) {
+            ++readiness.active_unassociated_endpoint_count;
         }
         if (same_id(endpoint.parent_device_id, instance_id)) {
             count_endpoint(endpoint, readiness.counts);

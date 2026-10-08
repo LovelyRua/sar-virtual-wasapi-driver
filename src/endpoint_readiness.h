@@ -44,7 +44,7 @@ struct InstanceReadiness {
     Instance instance;
     std::vector<WasapiEndpoint> endpoints;
     EndpointCounts counts;
-    size_t unassociated_endpoint_count = 0;
+    size_t active_unassociated_endpoint_count = 0;
     ReadinessState state = ReadinessState::device_missing;
     HRESULT inventory_error = S_OK;
     unsigned stable_samples = 0;
