@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include "src/device_instances.h"
+#include "src/endpoint_readiness.h"
 #include "src/wasapi_inventory.h"
 
 #include <windows.h>
@@ -28,6 +29,8 @@ void usage() {
         << L"  sar_endpoint_manager endpoints [all|render|capture] [--json]\n"
         << L"  sar_endpoint_manager summary [--json]\n"
         << L"  sar_endpoint_manager wait-endpoints <all|render|capture> <count> <timeout-ms>\n"
+        << L"  sar_endpoint_manager diagnose <instance-id> [--json]\n"
+        << L"  sar_endpoint_manager wait-ready <instance-id> <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager help\n\n"
         << L"Prototype limit: two instances, each with two stereo bus pairs.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
@@ -71,6 +74,10 @@ void print_endpoint_json(const sar::devices::WasapiEndpoint& endpoint) {
     json_string(endpoint.name);
     std::wcout << L",\"id\":";
     json_string(endpoint.id);
+    std::wcout << L",\"parentDeviceId\":";
+    json_string(endpoint.parent_device_id);
+    std::wcout << L",\"parentLookupHresult\":"
+               << static_cast<unsigned long>(endpoint.parent_lookup_error);
     std::wcout << L",\"state\":";
     json_string(sar::devices::state_name(endpoint.state));
     std::wcout << L",\"default\":" << (endpoint.is_default ? L"true" : L"false")
@@ -99,6 +106,13 @@ void print_endpoint(const sar::devices::WasapiEndpoint& endpoint) {
                    << static_cast<unsigned long>(endpoint.format_error) << std::dec << L')';
     }
     std::wcout << L'\n' << L"    " << endpoint.id << L'\n';
+    if (!endpoint.parent_device_id.empty()) {
+        std::wcout << L"    parent: " << endpoint.parent_device_id << L'\n';
+    } else {
+        std::wcout << L"    parent: unavailable (0x" << std::hex
+                   << static_cast<unsigned long>(endpoint.parent_lookup_error)
+                   << std::dec << L')' << L'\n';
+    }
 }
 
 HRESULT query_endpoints(std::vector<sar::devices::WasapiEndpoint>& endpoints) {
@@ -263,6 +277,104 @@ void print_instance(const sar::devices::Instance& instance) {
     std::wcout << L'\n';
 }
 
+void print_readiness_json(const sar::devices::InstanceReadiness& readiness) {
+    const auto& counts = readiness.counts;
+    std::wcout << L"{\"state\":";
+    json_string(sar::devices::readiness_state_name(readiness.state));
+    std::wcout << L",\"hint\":";
+    json_string(sar::devices::readiness_hint(readiness.state));
+    std::wcout << L",\"instance\":{\"id\":";
+    json_string(readiness.instance.id);
+    std::wcout << L",\"label\":";
+    json_string(readiness.instance.label);
+    std::wcout << L",\"started\":" << (readiness.instance.started ? L"true" : L"false")
+               << L",\"problem\":" << (readiness.instance.problem ? L"true" : L"false")
+               << L",\"problemCode\":" << readiness.instance.problem_code << L'}'
+               << L",\"expected\":{\"render\":"
+               << sar::devices::kRenderEndpointsPerInstance
+               << L",\"capture\":" << sar::devices::kCaptureEndpointsPerInstance << L'}'
+               << L",\"counts\":{\"render\":" << counts.render
+               << L",\"renderActive\":" << counts.render_active
+               << L",\"renderWithFormat\":" << counts.render_with_format
+               << L",\"capture\":" << counts.capture
+               << L",\"captureActive\":" << counts.capture_active
+               << L",\"captureWithFormat\":" << counts.capture_with_format << L'}'
+               << L",\"unassociatedSystemEndpoints\":"
+               << readiness.unassociated_endpoint_count
+               << L",\"stableSamples\":" << readiness.stable_samples
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(readiness.inventory_error)
+               << L",\"endpoints\":[";
+    for (size_t index = 0; index < readiness.endpoints.size(); ++index) {
+        if (index) std::wcout << L',';
+        print_endpoint_json(readiness.endpoints[index]);
+    }
+    std::wcout << L"]}";
+}
+
+void print_readiness(const sar::devices::InstanceReadiness& readiness) {
+    const auto& counts = readiness.counts;
+    std::wcout << L"Audio readiness: "
+               << sar::devices::readiness_state_name(readiness.state) << L'\n'
+               << L"  instance: " << readiness.instance.id << L" | "
+               << readiness.instance.label << L'\n'
+               << L"  PnP: " << (readiness.instance.started ? L"started" : L"not started");
+    if (readiness.instance.problem) {
+        std::wcout << L" (problem " << readiness.instance.problem_code << L')';
+    }
+    std::wcout << L'\n'
+               << L"  render endpoints: " << counts.render_active << L" active / "
+               << counts.render << L" present / " << counts.render_with_format
+               << L" with mix format; expected "
+               << sar::devices::kRenderEndpointsPerInstance << L'\n'
+               << L"  capture endpoints: " << counts.capture_active << L" active / "
+               << counts.capture << L" present / " << counts.capture_with_format
+               << L" with mix format; expected "
+               << sar::devices::kCaptureEndpointsPerInstance << L'\n'
+               << L"  system endpoints without a parent mapping: "
+               << readiness.unassociated_endpoint_count << L'\n'
+               << L"  consecutive ready samples: " << readiness.stable_samples << L" / "
+               << sar::devices::kStableReadinessSamples << L'\n'
+               << L"  diagnosis: " << sar::devices::readiness_hint(readiness.state) << L'\n';
+    for (const auto& endpoint : readiness.endpoints) print_endpoint(endpoint);
+}
+
+int diagnose(const std::wstring& instance_id, bool as_json, bool wait,
+             unsigned timeout_ms) {
+    sar::devices::InstanceReadiness readiness;
+    const HRESULT result = wait
+        ? sar::devices::wait_for_instance_readiness(instance_id, timeout_ms, readiness)
+        : sar::devices::inspect_instance_readiness(instance_id, readiness);
+
+    if (result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) {
+        readiness.state = sar::devices::ReadinessState::device_missing;
+    } else if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) {
+        std::wcerr << L"Readiness inspection failed: 0x" << std::hex
+                   << static_cast<unsigned long>(result) << std::dec << L'\n';
+        return 1;
+    }
+
+    if (as_json) {
+        print_readiness_json(readiness);
+        std::wcout << L'\n';
+    } else {
+        print_readiness(readiness);
+    }
+    if (result == HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 3;
+    if (SUCCEEDED(result) && readiness.ready()) return 0;
+    if (readiness.state == sar::devices::ReadinessState::device_missing) return 4;
+    return 1;
+}
+
+bool parse_timeout(const wchar_t* text, unsigned& timeout_ms) {
+    if (!text || !*text) return false;
+    wchar_t* end = nullptr;
+    const unsigned long value = std::wcstoul(text, &end, 10);
+    if (!end || *end || value == 0 || value > 120000) return false;
+    timeout_ms = static_cast<unsigned>(value);
+    return true;
+}
+
 int list() {
     std::vector<sar::devices::Instance> items;
     const auto result = sar::devices::list(items);
@@ -300,11 +412,18 @@ int add(const std::wstring& inf_path, const std::wstring& label) {
     if (!result.ok) return fail(result);
     std::wcout << L"Registered SAR experimental instance:\n";
     print_instance(created);
-    if (!created.started) {
-        std::wcout << L"Device is not started yet. Refresh with 'list' and inspect"
-                   << L" Device Manager before using its audio endpoints.\n";
+    sar::devices::InstanceReadiness readiness;
+    const HRESULT ready = sar::devices::wait_for_instance_readiness(
+        created.id, 30000, readiness);
+    if (SUCCEEDED(ready) && readiness.ready()) {
+        std::wcout << L"Published WASAPI topology is ready:\n";
+        print_readiness(readiness);
+        return 0;
     }
-    return 0;
+    std::wcerr << L"The PnP instance was registered but did not reach audio-ready state."
+               << L" It remains installed; inspect the report and remove it explicitly if needed.\n";
+    print_readiness(readiness);
+    return ready == HRESULT_FROM_WIN32(ERROR_TIMEOUT) ? 3 : 1;
 }
 
 int rename(const std::wstring& id, const std::wstring& label) {
@@ -354,6 +473,20 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (argc == 5 && std::wcscmp(argv[1], L"wait-endpoints") == 0) {
         return wait_endpoints(argv[2], argv[3], argv[4]);
+    }
+    if (argc == 3 && std::wcscmp(argv[1], L"diagnose") == 0) {
+        return diagnose(argv[2], false, false, 0);
+    }
+    if (argc == 4 && std::wcscmp(argv[1], L"diagnose") == 0 &&
+        std::wcscmp(argv[3], L"--json") == 0) {
+        return diagnose(argv[2], true, false, 0);
+    }
+    if ((argc == 4 || argc == 5) && std::wcscmp(argv[1], L"wait-ready") == 0) {
+        unsigned timeout_ms = 0;
+        if (!parse_timeout(argv[3], timeout_ms)) return 2;
+        const bool as_json = argc == 5 && std::wcscmp(argv[4], L"--json") == 0;
+        if (argc == 5 && !as_json) return 2;
+        return diagnose(argv[2], as_json, true, timeout_ms);
     }
 
     if (argc == 4 && std::wcscmp(argv[1], L"add") == 0) {

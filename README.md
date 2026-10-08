@@ -90,6 +90,28 @@ catalog signature state. A restricted PowerShell execution policy can be left
 unchanged by invoking the script over WinRM with `Invoke-Command -FilePath`.
 The preflight does not install a driver or alter boot policy.
 
+The endpoint manager's `add` command waits up to 30 seconds for that exact
+instance's two render and two capture endpoints to appear in WASAPI, become
+active, and expose a mix format. The readiness sample must pass three
+consecutive checks. Exit code 0 means the Windows audio topology is ready;
+exit code 3 means the PnP device remains installed but did not become
+audio-ready before timeout. It is deliberately not removed on timeout:
+
+```bat
+sar_endpoint_manager.exe diagnose ROOT\MEDIA\0001
+sar_endpoint_manager.exe diagnose ROOT\MEDIA\0001 --json
+sar_endpoint_manager.exe wait-ready ROOT\MEDIA\0001 30000 --json
+```
+
+Endpoint inventory includes its PnP parent instance ID. When two driver
+instances have identical INF-provided endpoint display names, readiness is
+attributed by the Windows `SWD\MMDEVAPI` parent relationship, never by a
+friendly-name guess or a machine-wide endpoint count. Reports show expected,
+present, active, and mix-format endpoint counts, stable-sample count, PnP
+status, endpoint IDs, and state-specific diagnostic guidance. `diagnose` is a
+point-in-time snapshot; `wait-ready` polls for up to 120 seconds and returns
+success only after stable readiness.
+
 After installing the experimental driver in the dedicated lab, build the
 standalone user-mode probe with CMake and run it in an interactive audio
 session. A manual `Transport` workflow run also retains the x64 probe

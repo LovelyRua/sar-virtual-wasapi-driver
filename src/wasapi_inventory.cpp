@@ -7,13 +7,19 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
+#include <devguid.h>
+#include <devpkey.h>
 #include <propvarutil.h>
 #include <propsys.h>
+#include <setupapi.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <cwctype>
+#include <map>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <utility>
 
 namespace sar::devices {
@@ -27,6 +33,109 @@ struct CoTaskMemDeleter {
 
 using CoTaskString = std::unique_ptr<wchar_t, CoTaskMemDeleter>;
 using CoTaskFormat = std::unique_ptr<WAVEFORMATEX, CoTaskMemDeleter>;
+
+struct DeviceInfoSetDeleter {
+    void operator()(HDEVINFO devices) const noexcept {
+        if (devices != INVALID_HANDLE_VALUE) SetupDiDestroyDeviceInfoList(devices);
+    }
+};
+
+using DeviceInfoSet = std::unique_ptr<std::remove_pointer_t<HDEVINFO>,
+                                      DeviceInfoSetDeleter>;
+
+struct EndpointParent {
+    std::wstring instance_id;
+    std::wstring parent_id;
+};
+
+std::wstring normalized_id(std::wstring value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](wchar_t ch) { return static_cast<wchar_t>(std::towupper(ch)); });
+    return value;
+}
+
+HRESULT read_device_instance_id(HDEVINFO devices, SP_DEVINFO_DATA& data,
+                                std::wstring& instance_id) {
+    DWORD required = 0;
+    SetupDiGetDeviceInstanceIdW(devices, &data, nullptr, 0, &required);
+    const DWORD first_error = GetLastError();
+    if (first_error != ERROR_INSUFFICIENT_BUFFER || required < 2 || required > 4096) {
+        return HRESULT_FROM_WIN32(first_error == ERROR_SUCCESS
+                                      ? ERROR_INVALID_DATA : first_error);
+    }
+
+    std::vector<wchar_t> buffer(required, L'\0');
+    if (!SetupDiGetDeviceInstanceIdW(devices, &data, buffer.data(), required, nullptr)) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    instance_id.assign(buffer.data());
+    return S_OK;
+}
+
+HRESULT read_parent_device_id(HDEVINFO devices, SP_DEVINFO_DATA& data,
+                              std::wstring& parent_id) {
+    DEVPROPTYPE type = 0;
+    DWORD required = 0;
+    SetupDiGetDevicePropertyW(devices, &data, &DEVPKEY_Device_Parent, &type,
+                              nullptr, 0, &required, 0);
+    const DWORD first_error = GetLastError();
+    if (first_error != ERROR_INSUFFICIENT_BUFFER || required < sizeof(wchar_t) ||
+        required > 65536 || type != DEVPROP_TYPE_STRING) {
+        return HRESULT_FROM_WIN32(first_error == ERROR_SUCCESS
+                                      ? ERROR_DATATYPE_MISMATCH : first_error);
+    }
+
+    std::vector<wchar_t> buffer(required / sizeof(wchar_t) + 1, L'\0');
+    if (!SetupDiGetDevicePropertyW(devices, &data, &DEVPKEY_Device_Parent, &type,
+                                   reinterpret_cast<PBYTE>(buffer.data()), required,
+                                   nullptr, 0)) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    if (type != DEVPROP_TYPE_STRING || buffer.front() == L'\0') {
+        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+    parent_id.assign(buffer.data());
+    return S_OK;
+}
+
+HRESULT enumerate_endpoint_parents(std::map<std::wstring, std::wstring>& parents) {
+    parents.clear();
+    DeviceInfoSet devices(SetupDiGetClassDevsW(&GUID_DEVCLASS_AUDIOENDPOINT, nullptr,
+                                               nullptr, DIGCF_PRESENT),
+                          DeviceInfoSetDeleter{});
+    if (!devices || devices.get() == INVALID_HANDLE_VALUE) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    for (DWORD index = 0; index < 4096; ++index) {
+        SP_DEVINFO_DATA data = {};
+        data.cbSize = sizeof(data);
+        if (!SetupDiEnumDeviceInfo(devices.get(), index, &data)) {
+            const DWORD error = GetLastError();
+            return error == ERROR_NO_MORE_ITEMS ? S_OK : HRESULT_FROM_WIN32(error);
+        }
+
+        EndpointParent entry;
+        HRESULT result = read_device_instance_id(devices.get(), data, entry.instance_id);
+        if (FAILED(result)) continue;
+        result = read_parent_device_id(devices.get(), data, entry.parent_id);
+        if (FAILED(result)) continue;
+        parents.emplace(normalized_id(entry.instance_id), std::move(entry.parent_id));
+    }
+    return HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+}
+
+void associate_parent(const std::map<std::wstring, std::wstring>& parents,
+                      WasapiEndpoint& endpoint) {
+    const std::wstring pnp_id = L"SWD\\MMDEVAPI\\" + endpoint.id;
+    const auto found = parents.find(normalized_id(pnp_id));
+    if (found == parents.end()) {
+        endpoint.parent_lookup_error = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+        return;
+    }
+    endpoint.parent_device_id = found->second;
+    endpoint.parent_lookup_error = S_OK;
+}
 
 class ComApartment final {
 public:
@@ -170,6 +279,13 @@ HRESULT enumerate_wasapi_endpoints(std::vector<WasapiEndpoint>& endpoints) {
     if (FAILED(result)) {
         endpoints.clear();
         return result;
+    }
+    std::map<std::wstring, std::wstring> endpoint_parents;
+    const HRESULT parent_result = enumerate_endpoint_parents(endpoint_parents);
+    if (SUCCEEDED(parent_result)) {
+        for (auto& endpoint : endpoints) associate_parent(endpoint_parents, endpoint);
+    } else {
+        for (auto& endpoint : endpoints) endpoint.parent_lookup_error = parent_result;
     }
     std::sort(endpoints.begin(), endpoints.end(), [](const auto& lhs, const auto& rhs) {
         if (lhs.flow != rhs.flow) return lhs.flow < rhs.flow;

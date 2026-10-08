@@ -15,6 +15,9 @@ enum class EndpointFlow { render, capture };
 struct WasapiEndpoint {
     std::wstring id;
     std::wstring name;
+    // The nearest hardware/adapter devnode owning this MMDEVAPI endpoint.
+    std::wstring parent_device_id;
+    HRESULT parent_lookup_error = S_OK;
     EndpointFlow flow = EndpointFlow::render;
     DWORD state = 0;
     bool is_default = false;
