@@ -278,3 +278,27 @@ temporary signing certificate was removed from My, Root, and TrustedPublisher;
 checks found no remaining sample device, INF, or matching certificate. All
 firewall profiles remained enabled. The user-authorized lab boot mode remains
 on (Secure Boot off, test signing on).
+
+## Stereo default lab result (2026-10-08)
+
+Commit `64c8370` changes the two experimental capture endpoints' default
+48 kHz/16-bit format to stereo and advertises two channels in their 48 kHz
+processed range. Lower-rate mono formats remain unchanged. The Windows driver
+and probe CI jobs passed; the downloaded package's nine files matched its
+SHA256 manifest before installation on VM24.
+
+In the logged-on session, both direct paired-bus `--stereo` probes negotiated
+two-channel capture. Each returned 0, with target power 1.15156e17 and
+cross-channel power below 8e4. The two unpaired cross-bus probes returned 3
+with zero target and cross-channel power. A two-channel SAR matrix route from
+Capture 1 to Headphones passed with 717 processed blocks; the route-free
+control processed 758 blocks and captured zero power on both analysis
+channels. These were four-second signal probes followed by a three-second
+engine observation, not a soak or latency measurement. The matrix probe
+checked output-channel activity but did not independently measure left/right
+crosstalk through SAR; that remains a separate acceptance gate.
+
+The experimental device, its OEM INF, and the non-exportable two-day lab
+certificate were removed after testing. Verification found none remaining;
+all VM24 firewall profiles stayed enabled, and its user-authorized test-signing
+boot mode remains active.
