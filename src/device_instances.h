@@ -29,7 +29,9 @@ struct Result {
 // The hardware ID is intentionally fixed. Never accept a caller-selected ID here:
 // it would make removal or renaming capable of touching an unrelated audio device.
 constexpr wchar_t kHardwareId[] = L"Root\\sysvad_ComponentizedAudioSample";
-constexpr size_t kMaximumInstances = 16;
+// SysVAD's NewAdapterCommon currently rejects a second adapter. Raise this
+// only after its static state is isolated per device and VM tests pass.
+constexpr size_t kMaximumInstances = 1;
 
 Result list(std::vector<Instance>& instances);
 Result add(const std::wstring& inf_path, const std::wstring& label,

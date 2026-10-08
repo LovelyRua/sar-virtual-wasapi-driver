@@ -19,7 +19,7 @@ void usage() {
         << L"  sar_endpoint_manager rename <instance-id> <label>\n"
         << L"  sar_endpoint_manager remove <instance-id> --confirm\n"
         << L"  sar_endpoint_manager help\n\n"
-        << L"Each instance exposes the driver's fixed two stereo bus pairs.\n"
+        << L"The current driver supports one instance with two stereo bus pairs.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
         << L"shared driver packages. It requires elevation for edits.\n";
 }
