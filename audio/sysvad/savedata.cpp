@@ -388,7 +388,6 @@ CSaveData::FileWriteHeader(void)
 
     return ntStatus;
 } // FileWriteHeader
-NTSTATUS
 #pragma code_seg()
 //=============================================================================
 PSAVEWORKER_PARAM
