@@ -47,8 +47,9 @@ HRESULT get_default_id(IMMDeviceEnumerator* enumerator, EDataFlow flow,
     const HRESULT activation = enumerator->GetDefaultAudioEndpoint(
         flow, eMultimedia, device.GetAddressOf());
     if (FAILED(activation)) return activation;
-    CoTaskString raw_id;
-    const HRESULT result = device->GetId(reinterpret_cast<LPWSTR*>(raw_id.GetAddressOf()));
+    LPWSTR raw_id_value = nullptr;
+    const HRESULT result = device->GetId(&raw_id_value);
+    CoTaskString raw_id(raw_id_value);
     if (FAILED(result)) return result;
     if (!raw_id) return E_UNEXPECTED;
     id.assign(raw_id.get());
@@ -130,8 +131,9 @@ HRESULT append_flow(IMMDeviceEnumerator* enumerator, EDataFlow flow,
         endpoint.flow = flow == eRender ? EndpointFlow::render : EndpointFlow::capture;
         result = device->GetState(&endpoint.state);
         if (FAILED(result)) return result;
-        CoTaskString raw_id;
-        result = device->GetId(reinterpret_cast<LPWSTR*>(raw_id.GetAddressOf()));
+        LPWSTR raw_id_value = nullptr;
+        result = device->GetId(&raw_id_value);
+        CoTaskString raw_id(raw_id_value);
         if (FAILED(result)) return result;
         if (!raw_id) return E_UNEXPECTED;
         endpoint.id.assign(raw_id.get());
