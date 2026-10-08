@@ -230,9 +230,12 @@ public:
         return now - lastPacket_ > std::chrono::milliseconds(250);
     }
 
-    bool Passed(unsigned seconds) const {
-        return windows_ >= seconds - 2 && failedWindows_ == 0 &&
-               discontinuities_ == 0 &&
+    bool ContentPassed(unsigned seconds) const {
+        return windows_ >= seconds - 2 && failedWindows_ == 0;
+    }
+
+    bool ContinuityPassed(unsigned seconds) const {
+        return discontinuities_ == 0 &&
                capturedFrames_ >= sar_driver::kProbeRate * (seconds - 2) &&
                sentFrames_ >= sar_driver::kProbeRate * (seconds - 2);
     }
@@ -312,9 +315,16 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
         throw;
     }
     for (const auto& stream : streams) stream.Summary();
-    bool passed = true;
-    for (const auto& stream : streams) passed = stream.Passed(seconds) && passed;
+    bool contentPassed = true;
+    bool continuityPassed = true;
+    for (const auto& stream : streams) {
+        contentPassed = stream.ContentPassed(seconds) && contentPassed;
+        continuityPassed = stream.ContinuityPassed(seconds) && continuityPassed;
+    }
+    const bool passed = contentPassed && continuityPassed;
     std::cout << "dual_bus_probe passed=" << static_cast<int>(passed)
+              << " content_passed=" << static_cast<int>(contentPassed)
+              << " continuity_passed=" << static_cast<int>(continuityPassed)
               << " active_buses=" << pairCount
               << " duration_seconds=" << seconds << '\n';
     return passed ? 0 : 3;

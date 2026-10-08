@@ -307,3 +307,32 @@ The experimental device, its OEM INF, and the non-exportable two-day lab
 certificate were removed after testing. Verification found none remaining;
 all VM24 firewall profiles stayed enabled, and its user-authorized test-signing
 boot mode remains active.
+
+## Concurrent two-bus continuity probe (2026-10-08)
+
+`wasapi_dual_bus_probe` opens both render/capture pairs at once. It renders four
+distinct tones, checks one-second windows for channel order and cross-bus bleed,
+and records WASAPI capture discontinuity flags and packet stalls. It accepts
+four endpoint IDs followed by a duration of 5 to 3600 seconds. `--single 0`
+or `--single 1` runs either pair alone with the same analysis. The portable
+signal analyzer has synthetic tests for silence, swapped/duplicated channels,
+cross-bus bleed, attenuation, and invalid input. Windows CI builds the probe
+and runs those tests.
+
+VM24's 15-second concurrent run passed: each bus produced 13 valid windows,
+with zero failed windows, zero silent frames, and zero discontinuities. Longer
+runs exposed a continuity limit: the 60-second concurrent run reported 7 and
+5 WASAPI discontinuities on buses 0 and 1, despite 58 valid windows per bus,
+zero failed windows, and zero silent frames. Single-bus 60-second controls
+reported 22 and 8 discontinuities. An independent VB-Cable 60-second control
+on the same VM and probe reported 10 discontinuities, also with 58 valid
+windows and zero silent frames. The VB-Cable baseline means these flags cannot
+currently be attributed uniquely to the SAR experimental driver; the strict
+continuity gate still fails. The probe reports content and continuity outcomes
+separately and returns failure when either fails. Further investigation needs
+host scheduling/VM load and hardware baseline measurements, not a claim of a
+glitch-free release driver.
+
+The stress-run experimental device, INF, and temporary certificate were
+removed from VM24 after testing. All firewall profiles remained enabled;
+its user-authorized test-signing boot mode remains active.
