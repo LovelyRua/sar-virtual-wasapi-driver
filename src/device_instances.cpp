@@ -4,7 +4,6 @@
 
 #include <cfgmgr32.h>
 #include <devguid.h>
-#include <newdev.h>
 #include <setupapi.h>
 
 #include <algorithm>
@@ -180,7 +179,7 @@ Result remove_registered(HDEVINFO set, SP_DEVINFO_DATA& data) {
 }
 
 Result validate_inf(const std::wstring& path) {
-    if (path.empty() || path.size() > 32767) {
+    if (path.empty() || path.size() >= MAX_PATH) {
         return Result::failure(ERROR_INVALID_PARAMETER, L"Invalid INF path");
     }
     const DWORD attributes = GetFileAttributesW(path.c_str());
@@ -190,6 +189,36 @@ Result validate_inf(const std::wstring& path) {
     const auto suffix = lower(path.substr(path.size() >= 4 ? path.size() - 4 : 0));
     if (suffix != L".inf") {
         return Result::failure(ERROR_INVALID_PARAMETER, L"Driver path must be an INF");
+    }
+    return Result::success();
+}
+
+Result select_driver(HDEVINFO set, SP_DEVINFO_DATA& data,
+                     const std::wstring& published_inf) {
+    SP_DEVINSTALL_PARAMS_W params = {};
+    params.cbSize = sizeof(params);
+    if (!SetupDiGetDeviceInstallParamsW(set, &data, &params)) {
+        return Result::failure(GetLastError(), L"Read driver selection parameters");
+    }
+    params.Flags |= DI_ENUMSINGLEINF;
+    params.FlagsEx |= DI_FLAGSEX_ALLOWEXCLUDEDDRVS;
+    if (published_inf.size() >= MAX_PATH) {
+        return Result::failure(ERROR_FILENAME_EXCED_RANGE, L"Published INF path too long");
+    }
+    std::wmemcpy(params.DriverPath, published_inf.c_str(), published_inf.size() + 1);
+    if (!SetupDiSetDeviceInstallParamsW(set, &data, &params)) {
+        return Result::failure(GetLastError(), L"Select SAR INF path");
+    }
+    if (!SetupDiBuildDriverInfoList(set, &data, SPDIT_COMPATDRIVER)) {
+        return Result::failure(GetLastError(), L"Find compatible SAR driver");
+    }
+    SP_DRVINFO_DATA_W driver = {};
+    driver.cbSize = sizeof(driver);
+    if (!SetupDiEnumDriverInfoW(set, &data, SPDIT_COMPATDRIVER, 0, &driver)) {
+        return Result::failure(GetLastError(), L"Select compatible SAR driver");
+    }
+    if (!SetupDiSetSelectedDriverW(set, &data, &driver)) {
+        return Result::failure(GetLastError(), L"Bind compatible SAR driver");
     }
     return Result::success();
 }
@@ -239,11 +268,12 @@ Result add(const std::wstring& inf_path, const std::wstring& label, Instance& cr
         }
     }
 
-    // Stage the signed package first. Existing instances may share the package;
-    // package cleanup is intentionally never coupled to instance removal.
-    BOOL reboot = FALSE;
-    if (!DiInstallDriverW(nullptr, inf_path.c_str(), 0, &reboot)) {
-        return Result::failure(GetLastError(), L"Stage signed driver package");
+    // Stage only: DiInstallDriver would also rebind already-present instances.
+    // New and existing SAR devices may be in active audio sessions.
+    wchar_t published_inf[MAX_PATH] = {};
+    if (!SetupCopyOEMInfW(inf_path.c_str(), nullptr, SPOST_PATH, 0,
+                           published_inf, MAX_PATH, nullptr, nullptr)) {
+        return Result::failure(GetLastError(), L"Stage signed SAR driver package");
     }
     DeviceSet set(SetupDiCreateDeviceInfoList(&GUID_DEVCLASS_MEDIA, nullptr),
                   &SetupDiDestroyDeviceInfoList);
@@ -263,6 +293,8 @@ Result add(const std::wstring& inf_path, const std::wstring& label, Instance& cr
         return Result::failure(GetLastError(), L"Set SAR hardware ID");
     }
     result = set_label(set.get(), data, label);
+    if (!result.ok) return result;
+    result = select_driver(set.get(), data, published_inf);
     if (!result.ok) return result;
     if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set.get(), &data)) {
         return Result::failure(GetLastError(), L"Register root Media device");

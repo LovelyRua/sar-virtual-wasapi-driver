@@ -26,7 +26,7 @@ if(WIN32)
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_compile_features(sar_device_instances PUBLIC cxx_std_17)
   target_include_directories(sar_device_instances PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-  target_link_libraries(sar_device_instances PUBLIC setupapi newdev cfgmgr32)
+  target_link_libraries(sar_device_instances PUBLIC setupapi cfgmgr32)
 
   add_executable(sar_endpoint_manager tools/sar_endpoint_manager.cpp)
   target_compile_features(sar_endpoint_manager PRIVATE cxx_std_17)
