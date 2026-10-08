@@ -113,6 +113,10 @@ public:
         Check(render_->GetService(IID_PPV_ARGS(&writer_)), "Get render service");
         Check(capture_->GetService(IID_PPV_ARGS(&reader_)), "Get capture service");
         Check(render_->GetBufferSize(&renderCapacity_), "Get render buffer size");
+        toneTable_.reserve(sar_driver::kProbeRate);
+        for (unsigned frame = 0; frame < sar_driver::kProbeRate; ++frame) {
+            toneTable_.push_back(sar_driver::ProbeFrame(bus_, frame));
+        }
         samples_.reserve(sar_driver::kProbeRate * 4);
         warmupFrames_ = sar_driver::kProbeRate;
     }
@@ -149,7 +153,7 @@ public:
         Check(writer_->GetBuffer(available, &bytes), "Get render buffer");
         auto* output = reinterpret_cast<std::int16_t*>(bytes);
         for (UINT32 frame = 0; frame < available; ++frame) {
-            const auto sample = sar_driver::ProbeFrame(bus_, sentFrames_ + frame);
+            const auto& sample = toneTable_[(sentFrames_ + frame) % sar_driver::kProbeRate];
             output[frame * 2] = sample[0];
             output[frame * 2 + 1] = sample[1];
         }
@@ -170,6 +174,9 @@ public:
             if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0 &&
                 warmupFrames_ == 0) {
                 ++discontinuities_;
+                std::cout << "bus=" << bus_ << " discontinuity=" << discontinuities_
+                          << " capture_frame=" << capturedFrames_
+                          << " packet_frames=" << frames << '\n';
             }
             for (UINT32 frame = 0; frame < frames; ++frame) {
                 if (warmupFrames_ != 0) {
@@ -261,6 +268,7 @@ private:
     bool captureStarted_ = false;
     Clock::time_point lastPacket_{};
     std::vector<float> samples_;
+    std::vector<std::array<std::int16_t, 2>> toneTable_;
 };
 
 unsigned ParseSeconds(const wchar_t* text) {
