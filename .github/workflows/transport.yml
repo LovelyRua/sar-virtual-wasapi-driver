@@ -24,6 +24,7 @@ jobs:
         with:
           name: wasapi-bridge-probe-x64
           path: |
+            build/Release/sar_endpoint_manager.exe
             build/Release/wasapi_bridge_probe.exe
             build/Release/wasapi_dual_bus_probe.exe
           if-no-files-found: error
