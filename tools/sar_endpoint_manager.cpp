@@ -29,7 +29,7 @@ void usage() {
         << L"  sar_endpoint_manager summary [--json]\n"
         << L"  sar_endpoint_manager wait-endpoints <all|render|capture> <count> <timeout-ms>\n"
         << L"  sar_endpoint_manager help\n\n"
-        << L"The current driver supports one instance with two stereo bus pairs.\n"
+        << L"Prototype limit: two instances, each with two stereo bus pairs.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
         << L"shared driver packages. It requires elevation for edits.\n";
 }
