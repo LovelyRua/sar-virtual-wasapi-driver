@@ -58,8 +58,7 @@ Abstract:
 //=============================================================================
 // Statics
 //=============================================================================
-ULONG CSaveData::m_ulStreamId = 0;
-ULONG CSaveData::m_ulOffloadStreamId = 0;
+static volatile LONG g_SaveDataNextStreamId = 0;
 
 #pragma code_seg("PAGE")
 //=============================================================================
@@ -69,6 +68,9 @@ ULONG CSaveData::m_ulOffloadStreamId = 0;
 //=============================================================================
 CSaveData::CSaveData()
 :   m_pDataBuffer(NULL),
+    m_pDeviceObject(NULL),
+    m_ulStreamId(0),
+    m_ulOffloadStreamId(0),
     m_FileHandle(NULL),
     m_ulFrameCount(DEFAULT_FRAME_COUNT),
     m_ulBufferSize(DEFAULT_BUFFER_SIZE),
@@ -387,32 +389,6 @@ CSaveData::FileWriteHeader(void)
     return ntStatus;
 } // FileWriteHeader
 NTSTATUS
-CSaveData::SetDeviceObject
-(
-    _In_  PDEVICE_OBJECT        DeviceObject
-)
-{
-    PAGED_CODE();
-
-    ASSERT(DeviceObject);
-
-    NTSTATUS                    ntStatus = STATUS_SUCCESS;
-    
-    m_pDeviceObject = DeviceObject;
-    return ntStatus;
-}
-
-PDEVICE_OBJECT
-CSaveData::GetDeviceObject
-(
-    void
-)
-{
-    PAGED_CODE();
-
-    return m_pDeviceObject;
-}
-
 #pragma code_seg()
 //=============================================================================
 PSAVEWORKER_PARAM
@@ -456,7 +432,8 @@ CSaveData::GetNewWorkItem
 NTSTATUS
 CSaveData::Initialize
 (
-    _In_ BOOL       _bOffloaded
+    _In_ BOOL               _bOffloaded,
+    _In_ PDEVICE_OBJECT     DeviceObject
 )
 {
     PAGED_CODE();
@@ -471,13 +448,20 @@ CSaveData::Initialize
 
     DPF_ENTER(("[CSaveData::Initialize]"));
 
+    if (DeviceObject == NULL)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    m_pDeviceObject = DeviceObject;
+    const ULONG streamId = static_cast<ULONG>(InterlockedIncrement(&g_SaveDataNextStreamId));
+
     if (_bOffloaded)
     {
-        m_ulOffloadStreamId++;
+        m_ulOffloadStreamId = streamId;
     }
     else
     {
-        m_ulStreamId++;
+        m_ulStreamId = streamId;
     }
 
     RtlInitUnicodeString(&fileName, DEFAULT_FILE_FOLDER1);

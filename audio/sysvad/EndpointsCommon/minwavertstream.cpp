@@ -423,7 +423,9 @@ Return Value:
         ntStatus = m_SaveData.SetDataFormat(DataFormat_);
         if (NT_SUCCESS(ntStatus))
         {
-            ntStatus = m_SaveData.Initialize(m_pMiniport->IsOffloadPin(Pin_));
+            ntStatus = m_SaveData.Initialize(
+                m_pMiniport->IsOffloadPin(Pin_),
+                m_pMiniport->GetAdapterCommObj()->GetDeviceObject());
         }
     
         if (!NT_SUCCESS(ntStatus))
