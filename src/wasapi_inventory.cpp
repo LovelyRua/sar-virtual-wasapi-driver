@@ -7,7 +7,6 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
-#include <devpkey.h>
 #include <propvarutil.h>
 #include <propsys.h>
 #include <setupapi.h>
@@ -42,6 +41,14 @@ struct DeviceInfoSetDeleter {
 using DeviceInfoSet = std::unique_ptr<std::remove_pointer_t<HDEVINFO>,
                                       DeviceInfoSetDeleter>;
 
+// SDK DEVPKEY_Device_Parent is declared extern-only. Keep this documented
+// public property key local so this utility does not define every SDK key via
+// INITGUID or add a global GUID definition to the manager binary.
+constexpr DEVPROPKEY kDeviceParentKey = {
+    {0x4340a6c5L, 0x93fa, 0x4706, {0x97, 0x2c, 0x7b, 0x64, 0x80, 0x08, 0xa5, 0xa7}},
+    8
+};
+
 struct EndpointParent {
     std::wstring instance_id;
     std::wstring parent_id;
@@ -75,7 +82,7 @@ HRESULT read_parent_device_id(HDEVINFO devices, SP_DEVINFO_DATA& data,
                               std::wstring& parent_id) {
     DEVPROPTYPE type = 0;
     DWORD required = 0;
-    SetupDiGetDevicePropertyW(devices, &data, &DEVPKEY_Device_Parent, &type,
+    SetupDiGetDevicePropertyW(devices, &data, &kDeviceParentKey, &type,
                               nullptr, 0, &required, 0);
     const DWORD first_error = GetLastError();
     if (first_error != ERROR_INSUFFICIENT_BUFFER || required < sizeof(wchar_t) ||
@@ -85,7 +92,7 @@ HRESULT read_parent_device_id(HDEVINFO devices, SP_DEVINFO_DATA& data,
     }
 
     std::vector<wchar_t> buffer(required / sizeof(wchar_t) + 1, L'\0');
-    if (!SetupDiGetDevicePropertyW(devices, &data, &DEVPKEY_Device_Parent, &type,
+    if (!SetupDiGetDevicePropertyW(devices, &data, &kDeviceParentKey, &type,
                                    reinterpret_cast<PBYTE>(buffer.data()), required,
                                    nullptr, 0)) {
         return HRESULT_FROM_WIN32(GetLastError());
