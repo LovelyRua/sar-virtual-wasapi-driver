@@ -280,7 +280,7 @@ Result add(const std::wstring& inf_path, const std::wstring& label, Instance& cr
     if (!valid_set(set)) return Result::failure(GetLastError(), L"Create Media device set");
     SP_DEVINFO_DATA data = {};
     data.cbSize = sizeof(data);
-    if (!SetupDiCreateDeviceInfoW(set.get(), L"SAR Experimental Audio", &GUID_DEVCLASS_MEDIA,
+    if (!SetupDiCreateDeviceInfoW(set.get(), L"MEDIA", &GUID_DEVCLASS_MEDIA,
                                    nullptr, nullptr, DICD_GENERATE_ID, &data)) {
         return Result::failure(GetLastError(), L"Create root Media device");
     }
