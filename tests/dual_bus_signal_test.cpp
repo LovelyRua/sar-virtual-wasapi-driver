@@ -1,0 +1,144 @@
+#include "src/dual_bus_signal.h"
+
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <vector>
+
+namespace {
+
+using sar_driver::AnalyzeSignalWindow;
+using sar_driver::kProbeRate;
+using sar_driver::ProbeFrame;
+
+int failures = 0;
+
+void Expect(bool condition, const char* message) {
+    if (!condition) {
+        std::fprintf(stderr, "FAIL: %s\n", message);
+        ++failures;
+    }
+}
+
+std::vector<float> MakeWindow(unsigned bus) {
+    std::vector<float> samples(kProbeRate * 2);
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        const auto pcm = ProbeFrame(bus, frame);
+        samples[frame * 2] = pcm[0] / 32768.0f;
+        samples[frame * 2 + 1] = pcm[1] / 32768.0f;
+    }
+    return samples;
+}
+
+void TestPairedBuses() {
+    for (unsigned bus = 0; bus < 2; ++bus) {
+        const auto samples = MakeWindow(bus);
+        const auto result = AnalyzeSignalWindow(samples.data(), kProbeRate, bus);
+        Expect(result.passed(), "paired bus must pass");
+        Expect(result.expected_power[0] > 0.01, "left tone must have power");
+        Expect(result.expected_power[1] > 0.01, "right tone must have power");
+        Expect(result.wrong_channel_power[0] < 1e-6,
+               "right tone must not leak into left");
+        Expect(result.wrong_channel_power[1] < 1e-6,
+               "left tone must not leak into right");
+        Expect(result.other_bus_power[0] < 1e-6,
+               "other bus must not leak into left");
+        Expect(result.other_bus_power[1] < 1e-6,
+               "other bus must not leak into right");
+    }
+}
+
+void TestSilenceAndMissingChannel() {
+    std::vector<float> silence(kProbeRate * 2, 0.0f);
+    const auto zero = AnalyzeSignalWindow(silence.data(), kProbeRate, 0);
+    Expect(!zero.passed(), "silence must fail");
+    Expect(!zero.enough_signal, "silence must report missing signal");
+
+    auto samples = MakeWindow(0);
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        samples[frame * 2 + 1] = 0.0f;
+    }
+    const auto missing = AnalyzeSignalWindow(samples.data(), kProbeRate, 0);
+    Expect(!missing.passed(), "missing right channel must fail");
+    Expect(missing.expected_power[0] > 0.01,
+           "present left channel must remain detectable");
+    Expect(missing.expected_power[1] < 1e-10,
+           "missing right channel must have no expected power");
+}
+
+void TestSwappedAndDuplicatedChannels() {
+    auto swapped = MakeWindow(0);
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        const float left = swapped[frame * 2];
+        swapped[frame * 2] = swapped[frame * 2 + 1];
+        swapped[frame * 2 + 1] = left;
+    }
+    const auto reversed = AnalyzeSignalWindow(swapped.data(), kProbeRate, 0);
+    Expect(!reversed.passed(), "swapped stereo channels must fail");
+    Expect(!reversed.channel_order_ok, "swap must flag channel order");
+
+    auto duplicated = MakeWindow(0);
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        duplicated[frame * 2 + 1] = duplicated[frame * 2];
+    }
+    const auto mono = AnalyzeSignalWindow(duplicated.data(), kProbeRate, 0);
+    Expect(!mono.passed(), "duplicated mono must fail stereo check");
+    Expect(!mono.enough_signal, "duplicated left tone lacks right tone");
+}
+
+void TestCrossBusAndAttenuation() {
+    const auto bus0 = MakeWindow(0);
+    const auto wrongBus = AnalyzeSignalWindow(bus0.data(), kProbeRate, 1);
+    Expect(!wrongBus.passed(), "cross-bus signal must fail");
+    Expect(!wrongBus.enough_signal, "cross-bus signal lacks target tones");
+
+    auto mixed = MakeWindow(0);
+    const auto bus1 = MakeWindow(1);
+    for (std::size_t index = 0; index < mixed.size(); ++index) {
+        mixed[index] += bus1[index] * 0.5f;
+    }
+    const auto leakage = AnalyzeSignalWindow(mixed.data(), kProbeRate, 0);
+    Expect(!leakage.passed(), "strong bus bleed must fail");
+    Expect(!leakage.bus_isolation_ok, "bus bleed must be reported");
+
+    auto attenuated = MakeWindow(0);
+    for (float& value : attenuated) value *= 0.1f;
+    Expect(AnalyzeSignalWindow(attenuated.data(), kProbeRate, 0).passed(),
+           "moderately attenuated clean signal must pass");
+}
+
+void TestInvalidInput() {
+    const auto samples = MakeWindow(0);
+    Expect(!AnalyzeSignalWindow(nullptr, kProbeRate, 0).passed(),
+           "null input must fail");
+    Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate - 1, 0).passed(),
+           "short window must fail");
+    Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 2).passed(),
+           "unknown bus must fail");
+    Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 0, 0.0).passed(),
+           "invalid threshold must fail");
+    Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 0, 1e-5, 1.0).passed(),
+           "invalid isolation ratio must fail");
+    Expect(ProbeFrame(2, 0) == std::array<std::int16_t, 2>{0, 0},
+           "invalid bus generator must be silent");
+    Expect(ProbeFrame(0, 0, 2.0) == std::array<std::int16_t, 2>{0, 0},
+           "invalid amplitude generator must be silent");
+    Expect(ProbeFrame(0, 0) == ProbeFrame(0, kProbeRate),
+           "generator phase must wrap after one second");
+}
+
+} // namespace
+
+int main() {
+    TestPairedBuses();
+    TestSilenceAndMissingChannel();
+    TestSwappedAndDuplicatedChannels();
+    TestCrossBusAndAttenuation();
+    TestInvalidInput();
+    if (failures != 0) {
+        std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
+        return 1;
+    }
+    std::puts("dual bus signal analysis passed");
+    return 0;
+}
