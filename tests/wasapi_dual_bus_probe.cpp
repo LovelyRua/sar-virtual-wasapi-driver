@@ -280,13 +280,16 @@ unsigned ParseSeconds(const wchar_t* text) {
     return static_cast<unsigned>(value);
 }
 
-int Run(const wchar_t* const* ids, unsigned seconds) {
+int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
+        unsigned seconds) {
     ComPtr<IMMDeviceEnumerator> enumerator;
     Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                            IID_PPV_ARGS(&enumerator)), "Create endpoint enumerator");
-    std::array<StreamPair, 2> streams;
-    streams[0].Open(enumerator.Get(), ids[0], ids[1], 0);
-    streams[1].Open(enumerator.Get(), ids[2], ids[3], 1);
+    std::vector<StreamPair> streams(pairCount);
+    for (unsigned index = 0; index < pairCount; ++index) {
+        streams[index].Open(enumerator.Get(), ids[index * 2], ids[index * 2 + 1],
+                            firstBus + index);
+    }
     try {
         for (auto& stream : streams) stream.StartCapture();
         for (auto& stream : streams) stream.StartRender();
@@ -309,8 +312,10 @@ int Run(const wchar_t* const* ids, unsigned seconds) {
         throw;
     }
     for (const auto& stream : streams) stream.Summary();
-    const bool passed = streams[0].Passed(seconds) && streams[1].Passed(seconds);
+    bool passed = true;
+    for (const auto& stream : streams) passed = stream.Passed(seconds) && passed;
     std::cout << "dual_bus_probe passed=" << static_cast<int>(passed)
+              << " active_buses=" << pairCount
               << " duration_seconds=" << seconds << '\n';
     return passed ? 0 : 3;
 }
@@ -320,7 +325,8 @@ int Run(const wchar_t* const* ids, unsigned seconds) {
 int wmain(int argc, wchar_t** argv) {
     if (argc != 6) {
         std::wcerr << L"Usage: wasapi_dual_bus_probe <render1> <capture1>"
-                      L" <render2> <capture2> <seconds>\n";
+                      L" <render2> <capture2> <seconds> | --single <bus:0|1>"
+                      L" <render> <capture> <seconds>\n";
         return 1;
     }
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -331,8 +337,17 @@ int wmain(int argc, wchar_t** argv) {
     int result = 1;
     try {
         const unsigned seconds = ParseSeconds(argv[5]);
-        const std::array<const wchar_t*, 4> ids{{argv[1], argv[2], argv[3], argv[4]}};
-        result = Run(ids.data(), seconds);
+        if (std::wstring(argv[1]) == L"--single") {
+            const std::wstring bus(argv[2]);
+            if (bus != L"0" && bus != L"1") {
+                throw std::runtime_error("Single-bus mode requires bus 0 or 1");
+            }
+            const std::array<const wchar_t*, 2> ids{{argv[3], argv[4]}};
+            result = Run(ids.data(), 1, bus == L"1" ? 1 : 0, seconds);
+        } else {
+            const std::array<const wchar_t*, 4> ids{{argv[1], argv[2], argv[3], argv[4]}};
+            result = Run(ids.data(), 2, 0, seconds);
+        }
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
     }
