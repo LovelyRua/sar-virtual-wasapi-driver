@@ -7,7 +7,6 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
-#include <devguid.h>
 #include <devpkey.h>
 #include <propvarutil.h>
 #include <propsys.h>
@@ -100,7 +99,7 @@ HRESULT read_parent_device_id(HDEVINFO devices, SP_DEVINFO_DATA& data,
 
 HRESULT enumerate_endpoint_parents(std::map<std::wstring, std::wstring>& parents) {
     parents.clear();
-    DeviceInfoSet devices(SetupDiGetClassDevsW(&GUID_DEVCLASS_AUDIOENDPOINT, nullptr,
+    DeviceInfoSet devices(SetupDiGetClassDevsW(&AUDIOENDPOINT_CLASS_UUID, nullptr,
                                                nullptr, DIGCF_PRESENT),
                           DeviceInfoSetDeleter{});
     if (!devices || devices.get() == INVALID_HANDLE_VALUE) {
