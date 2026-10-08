@@ -296,7 +296,12 @@ control processed 758 blocks and captured zero power on both analysis
 channels. These were four-second signal probes followed by a three-second
 engine observation, not a soak or latency measurement. The matrix probe
 checked output-channel activity but did not independently measure left/right
-crosstalk through SAR; that remains a separate acceptance gate.
+crosstalk through SAR. The follow-up probe at `1944f6d` closed that gap: the
+same two-channel SAR route passed with target power 1.10668e17,
+cross-channel power 7.06931e9, and 552 processed blocks. The no-route control
+processed 720 blocks and measured zero target, cross-channel, and second-channel
+power. This is a short functional channel-order check, not a noise-floor or
+long-duration crosstalk specification.
 
 The experimental device, its OEM INF, and the non-exportable two-day lab
 certificate were removed after testing. Verification found none remaining;
