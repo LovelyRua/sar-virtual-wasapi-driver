@@ -3,6 +3,7 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include <mmdeviceapi.h>
 
 #include <string>
 #include <vector>
