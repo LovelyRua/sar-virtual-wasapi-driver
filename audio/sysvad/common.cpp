@@ -51,6 +51,47 @@ Abstract:
 // CSaveData statics
 //-----------------------------------------------------------------------------
 
+class CBridgeSpinLockGuard
+{
+public:
+    explicit CBridgeSpinLockGuard(_Inout_ PKSPIN_LOCK Lock)
+        : m_Lock(Lock),
+          m_AtDispatchLevel(KeGetCurrentIrql() >= DISPATCH_LEVEL),
+          m_OldIrql(PASSIVE_LEVEL)
+    {
+        // UpdatePosition is called from both DPC and position-query paths.
+        NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+        if (m_AtDispatchLevel)
+        {
+            KeAcquireSpinLockAtDpcLevel(m_Lock);
+        }
+        else
+        {
+            KeAcquireSpinLock(m_Lock, &m_OldIrql);
+        }
+    }
+
+    ~CBridgeSpinLockGuard()
+    {
+        if (m_AtDispatchLevel)
+        {
+            KeReleaseSpinLockFromDpcLevel(m_Lock);
+        }
+        else
+        {
+            KeReleaseSpinLock(m_Lock, m_OldIrql);
+        }
+    }
+
+    CBridgeSpinLockGuard(const CBridgeSpinLockGuard&) = delete;
+    CBridgeSpinLockGuard& operator=(const CBridgeSpinLockGuard&) = delete;
+
+private:
+    PKSPIN_LOCK m_Lock;
+    BOOLEAN m_AtDispatchLevel;
+    KIRQL m_OldIrql;
+};
+
 //=============================================================================
 // Classes
 //=============================================================================
@@ -755,8 +796,7 @@ STDMETHODIMP_(VOID)
 CAdapterCommon::BridgeWrite(_In_ ULONG Bus, _In_reads_bytes_(Bytes) const BYTE* Data, _In_ ULONG Bytes)
 {
     if (Bus >= 2) return;
-    KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
     if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0)
     {
         m_BridgeInvalidWriteBytes[Bus] += Bytes;
@@ -766,7 +806,6 @@ CAdapterCommon::BridgeWrite(_In_ ULONG Bus, _In_reads_bytes_(Bytes) const BYTE* 
         ++m_BridgeWriteCalls[Bus];
         m_BridgeRing[Bus].Write(Data, Bytes / 4);
     }
-    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 STDMETHODIMP_(VOID)
@@ -781,8 +820,7 @@ CAdapterCommon::BridgeRead(_In_ ULONG Bus, _Out_writes_bytes_(Bytes) BYTE* Data,
     {
         RtlZeroMemory(Data, Bytes);
     }
-    KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
     if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0)
     {
         m_BridgeInvalidReadBytes[Bus] += Bytes;
@@ -792,21 +830,18 @@ CAdapterCommon::BridgeRead(_In_ ULONG Bus, _Out_writes_bytes_(Bytes) BYTE* Data,
         ++m_BridgeReadCalls[Bus];
         m_BridgeRing[Bus].Read(Data, Bytes / 4);
     }
-    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 STDMETHODIMP_(VOID)
 CAdapterCommon::BridgeReset(_In_ ULONG Bus)
 {
     if (Bus >= 2) return;
-    KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
     m_BridgeRing[Bus].Reset();
     m_BridgeInvalidWriteBytes[Bus] = 0;
     m_BridgeInvalidReadBytes[Bus] = 0;
     m_BridgeWriteCalls[Bus] = 0;
     m_BridgeReadCalls[Bus] = 0;
-    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 STDMETHODIMP_(VOID)
@@ -816,8 +851,7 @@ CAdapterCommon::BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats)
     RtlZeroMemory(Stats, sizeof(*Stats));
     if (Bus >= 2) return;
 
-    KIRQL oldIrql;
-    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
     Stats->QueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].queued_frames());
     Stats->PeakQueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].peak_queued_frames());
     Stats->DroppedFrames = m_BridgeRing[Bus].dropped_frames();
@@ -826,7 +860,6 @@ CAdapterCommon::BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats)
     Stats->InvalidReadBytes = m_BridgeInvalidReadBytes[Bus];
     Stats->WriteCalls = m_BridgeWriteCalls[Bus];
     Stats->ReadCalls = m_BridgeReadCalls[Bus];
-    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 //=============================================================================
