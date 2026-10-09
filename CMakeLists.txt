@@ -50,6 +50,7 @@ if(WIN32)
 
   add_executable(wasapi_bridge_probe tests/wasapi_bridge_probe.cpp)
   target_compile_features(wasapi_bridge_probe PRIVATE cxx_std_17)
+  target_include_directories(wasapi_bridge_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(wasapi_bridge_probe PRIVATE ole32 uuid)
   if(MSVC)
     target_compile_options(wasapi_bridge_probe PRIVATE /W4 /WX)
