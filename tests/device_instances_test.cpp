@@ -19,8 +19,16 @@ bool test_sar_hardware_id_matches_both_infs() {
     const auto contains_hardware_id = [](const char* path) {
         std::ifstream file(path, std::ios::binary);
         if (!file) return false;
-        const std::string contents((std::istreambuf_iterator<char>(file)),
-                                   std::istreambuf_iterator<char>());
+        const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)),
+                                               std::istreambuf_iterator<char>());
+        if (bytes.size() < 2 || bytes[0] != 0xff || bytes[1] != 0xfe) return false;
+        std::string contents;
+        contents.reserve(bytes.size() / 2);
+        for (std::size_t offset = 2; offset + 1 < bytes.size(); offset += 2) {
+            if (bytes[offset + 1] == 0) {
+                contents.push_back(static_cast<char>(bytes[offset]));
+            }
+        }
         return contents.find("Root\\SystemAudioRoute\\VirtualAudio") !=
                    std::string::npos &&
                contents.find("Root\\sysvad_ComponentizedAudioSample") ==
