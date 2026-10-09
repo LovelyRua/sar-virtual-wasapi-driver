@@ -106,8 +106,8 @@ bool test_single_mode_allows_independent_endpoint_pair() {
     const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"1", L"render-id", L"capture-id", L"5"}};
     sar_driver::WasapiProbeOptions options;
     return parse(args.data(), 6, options) && options.pair_count == 1 &&
-           options.endpoint_ids[0] == L"render-id" &&
-           options.endpoint_ids[1] == L"capture-id";
+           std::wcscmp(options.endpoint_ids[0], L"render-id") == 0 &&
+           std::wcscmp(options.endpoint_ids[1], L"capture-id") == 0;
 }
 
 bool test_invalid_reused_endpoint_does_not_publish_partial_options() {
