@@ -65,8 +65,8 @@ public:
 
 private:
     std::array<std::array<float, kSamplesPerWindow>, SlotCount> windows_{};
-    alignas(64) std::atomic<std::uint64_t> write_sequence_{0};
-    alignas(64) std::atomic<std::uint64_t> read_sequence_{0};
+    std::atomic<std::uint64_t> write_sequence_{0};
+    std::atomic<std::uint64_t> read_sequence_{0};
     std::atomic<std::uint64_t> dropped_windows_{0};
     std::atomic<std::uint64_t> invalid_pushes_{0};
 };
