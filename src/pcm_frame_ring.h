@@ -10,6 +10,7 @@ public:
     struct WriteResult {
         size_t accepted_frames;
         size_t dropped_frames;
+        size_t queued_frames;
     };
 
     bool Initialize(unsigned char* storage, size_t capacity_frames, size_t bytes_per_frame) {
@@ -31,14 +32,15 @@ public:
         queued_frames_ = 0;
         dropped_frames_ = 0;
         silent_frames_ = 0;
+        peak_queued_frames_ = 0;
     }
 
     WriteResult Write(const unsigned char* source, size_t frames) {
         if (storage_ == nullptr || (frames != 0 && source == nullptr) ||
             frames > static_cast<size_t>(-1) / bytes_per_frame_) {
-            return {0, 0};
+            return {0, 0, queued_frames_};
         }
-        if (frames == 0) return {0, 0};
+        if (frames == 0) return {0, 0, queued_frames_};
 
         const size_t skipped_input = frames > capacity_frames_ ? frames - capacity_frames_ : 0;
         source += skipped_input * bytes_per_frame_;
@@ -53,7 +55,8 @@ public:
 
         CopyToRing(source, frames);
         queued_frames_ += frames;
-        return {frames, dropped};
+        if (queued_frames_ > peak_queued_frames_) peak_queued_frames_ = queued_frames_;
+        return {frames, dropped, queued_frames_};
     }
 
     // Returns valid frames. Any missing frames are explicitly zeroed.
@@ -74,6 +77,7 @@ public:
     }
 
     size_t queued_frames() const { return queued_frames_; }
+    size_t peak_queued_frames() const { return peak_queued_frames_; }
     unsigned long long dropped_frames() const { return dropped_frames_; }
     unsigned long long silent_frames() const { return silent_frames_; }
 
@@ -118,6 +122,7 @@ private:
     size_t queued_frames_ = 0;
     unsigned long long dropped_frames_ = 0;
     unsigned long long silent_frames_ = 0;
+    size_t peak_queued_frames_ = 0;
 };
 
 } // namespace sar_driver

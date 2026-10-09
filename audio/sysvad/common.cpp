@@ -87,6 +87,10 @@ class CAdapterCommon :
         KSPIN_LOCK              m_BridgeLock[2];
         BYTE                    m_BridgeStorage[2][4096 * 4];
         sar_driver::PcmFrameRing m_BridgeRing[2];
+        ULONGLONG               m_BridgeInvalidWriteBytes[2];
+        ULONGLONG               m_BridgeInvalidReadBytes[2];
+        ULONGLONG               m_BridgeWriteCalls[2];
+        ULONGLONG               m_BridgeReadCalls[2];
 
         static LONG             m_AdapterInstances;     // # of adapter objects.
 
@@ -134,6 +138,7 @@ class CAdapterCommon :
                                       _Out_writes_bytes_(Bytes) BYTE* Data,
                                       _In_ ULONG Bytes);
         STDMETHODIMP_(VOID) BridgeReset(_In_ ULONG Bus);
+        STDMETHODIMP_(VOID) BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats);
 
         STDMETHODIMP_(void)     SetWaveServiceGroup
         (   
@@ -749,25 +754,44 @@ Return Value:
 STDMETHODIMP_(VOID)
 CAdapterCommon::BridgeWrite(_In_ ULONG Bus, _In_reads_bytes_(Bytes) const BYTE* Data, _In_ ULONG Bytes)
 {
-    if (Bus >= 2 || Data == NULL || Bytes == 0 || (Bytes % 4) != 0) return;
+    if (Bus >= 2) return;
     KIRQL oldIrql;
     KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
-    m_BridgeRing[Bus].Write(Data, Bytes / 4);
+    if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0)
+    {
+        m_BridgeInvalidWriteBytes[Bus] += Bytes;
+    }
+    else
+    {
+        ++m_BridgeWriteCalls[Bus];
+        m_BridgeRing[Bus].Write(Data, Bytes / 4);
+    }
     KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
 STDMETHODIMP_(VOID)
 CAdapterCommon::BridgeRead(_In_ ULONG Bus, _Out_writes_bytes_(Bytes) BYTE* Data, _In_ ULONG Bytes)
 {
-    if (Data == NULL || Bytes == 0) return;
-    if (Bus >= 2 || (Bytes % 4) != 0)
+    if (Bus >= 2)
+    {
+        if (Data != NULL && Bytes != 0) RtlZeroMemory(Data, Bytes);
+        return;
+    }
+    if (Data != NULL && Bytes != 0 && (Bytes % 4) != 0)
     {
         RtlZeroMemory(Data, Bytes);
-        return;
     }
     KIRQL oldIrql;
     KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
-    m_BridgeRing[Bus].Read(Data, Bytes / 4);
+    if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0)
+    {
+        m_BridgeInvalidReadBytes[Bus] += Bytes;
+    }
+    else
+    {
+        ++m_BridgeReadCalls[Bus];
+        m_BridgeRing[Bus].Read(Data, Bytes / 4);
+    }
     KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
@@ -778,6 +802,30 @@ CAdapterCommon::BridgeReset(_In_ ULONG Bus)
     KIRQL oldIrql;
     KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
     m_BridgeRing[Bus].Reset();
+    m_BridgeInvalidWriteBytes[Bus] = 0;
+    m_BridgeInvalidReadBytes[Bus] = 0;
+    m_BridgeWriteCalls[Bus] = 0;
+    m_BridgeReadCalls[Bus] = 0;
+    KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
+}
+
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats)
+{
+    if (Stats == NULL) return;
+    RtlZeroMemory(Stats, sizeof(*Stats));
+    if (Bus >= 2) return;
+
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&m_BridgeLock[Bus], &oldIrql);
+    Stats->QueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].queued_frames());
+    Stats->PeakQueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].peak_queued_frames());
+    Stats->DroppedFrames = m_BridgeRing[Bus].dropped_frames();
+    Stats->SilentFrames = m_BridgeRing[Bus].silent_frames();
+    Stats->InvalidWriteBytes = m_BridgeInvalidWriteBytes[Bus];
+    Stats->InvalidReadBytes = m_BridgeInvalidReadBytes[Bus];
+    Stats->WriteCalls = m_BridgeWriteCalls[Bus];
+    Stats->ReadCalls = m_BridgeReadCalls[Bus];
     KeReleaseSpinLock(&m_BridgeLock[Bus], oldIrql);
 }
 
@@ -834,6 +882,10 @@ Return Value:
     m_pPortClsEtwHelper     = NULL;
     for (ULONG bus = 0; bus < 2; ++bus)
     {
+        m_BridgeInvalidWriteBytes[bus] = 0;
+        m_BridgeInvalidReadBytes[bus] = 0;
+        m_BridgeWriteCalls[bus] = 0;
+        m_BridgeReadCalls[bus] = 0;
         KeInitializeSpinLock(&m_BridgeLock[bus]);
         if (!m_BridgeRing[bus].Initialize(m_BridgeStorage[bus], 4096, 4))
         {

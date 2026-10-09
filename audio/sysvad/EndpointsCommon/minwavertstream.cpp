@@ -1581,6 +1581,10 @@ ByteDisplacement - # of bytes to process.
                     output += frames * sizeof(SHORT);
                     framesRemaining -= frames;
                 }
+                if ((runWrite % sizeof(SHORT)) != 0)
+                {
+                    output[framesRemaining * sizeof(SHORT)] = 0;
+                }
             }
             else
             {
