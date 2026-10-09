@@ -435,3 +435,29 @@ Original `oem10.inf` and `oem11.inf` remain installed. Test-signing remains
 enabled, Secure Boot remains disabled, and all firewall profiles remain
 enabled as previously authorized. Probe reports are retained at
 `C:\sar-lab\bridge-diag-7453129\probe` on VM24.
+
+## Event-driven probe retest (2026-10-09)
+
+Commits `b0139eb` and `8816df2` replace fixed-interval probe servicing with a
+shared WASAPI event pump, drain other signaled streams in the same pass, and
+count capture packets, discontinuities, silent frames, clipping, and non-finite
+samples. The Transport workflow and pinned WDK build both pass; the interactive
+launcher argument tests pass locally.
+
+The exact CI package was installed on VM24 as `ROOT\MEDIA\0001`, and both
+simultaneous 48 kHz stereo buses produced the expected signals. Across two
+15-second runs, every one-second analysis window passed, with zero silent
+frames/packets, zero clipping, and zero non-finite samples. Continuity did not
+pass: run one measured 3 discontinuities on each bus (720384/719904 sent and
+719904/718848 captured frames); run two measured 13 and 9 discontinuities
+(717216/716832 sent and 715680/716352 captured frames). The repeat variance is
+material, so the event-driven change is not evidence of a stable or glitch-free
+driver. It improves measurement and signal-content validation, while the
+remaining discontinuities still require investigation across the VM scheduler,
+capture packet cadence, and the driver path. Keep the strict zero-discontinuity
+acceptance gate.
+
+After the retest, only the newly added `ROOT\MEDIA\0001`, `oem12.inf`, its
+temporary signing certificate, and the unique probe staging directory were
+removed. Earlier `oem10.inf` and `oem11.inf`, test-signing mode, disabled Secure
+Boot, and all enabled firewall profiles were preserved.
