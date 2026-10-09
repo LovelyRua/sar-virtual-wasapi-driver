@@ -22,6 +22,16 @@ else()
 endif()
 add_test(NAME dual_bus_signal_test COMMAND dual_bus_signal_test)
 
+add_executable(signal_window_queue_test tests/signal_window_queue_test.cpp)
+target_compile_features(signal_window_queue_test PRIVATE cxx_std_17)
+target_include_directories(signal_window_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(signal_window_queue_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(signal_window_queue_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME signal_window_queue_test COMMAND signal_window_queue_test)
+
 if(WIN32)
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_sources(sar_device_instances PRIVATE

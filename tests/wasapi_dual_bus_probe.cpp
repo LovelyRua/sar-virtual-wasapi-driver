@@ -7,8 +7,10 @@
 
 #include "src/dual_bus_signal.h"
 #include "src/wasapi_event_pump.h"
+#include "src/signal_window_queue.h"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -17,6 +19,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -25,6 +28,7 @@ using Microsoft::WRL::ComPtr;
 namespace {
 
 using Clock = std::chrono::steady_clock;
+std::mutex g_analysis_output_mutex;
 
 void Check(HRESULT result, const char* operation) {
     if (FAILED(result)) {
@@ -83,6 +87,14 @@ CaptureFormat InspectCaptureFormat(const WAVEFORMATEX* format) {
 
 class StreamPair {
 public:
+    using AnalysisQueue = sar_driver::SignalWindowQueue<
+        sar_driver::kProbeRate, sar_driver::kProbeChannels, 4>;
+
+    ~StreamPair() {
+        Stop();
+        StopAnalyzer();
+    }
+
     void Open(IMMDeviceEnumerator* enumerator, const wchar_t* renderId,
               const wchar_t* captureId, unsigned bus,
               HANDLE renderEvent, HANDLE captureEvent) {
@@ -125,8 +137,33 @@ public:
         for (unsigned frame = 0; frame < sar_driver::kProbeRate; ++frame) {
             toneTable_.push_back(sar_driver::ProbeFrame(bus_, frame));
         }
-        samples_.reserve(sar_driver::kProbeRate * 4);
         warmupFrames_ = sar_driver::kProbeRate;
+    }
+
+    void StartAnalyzer() {
+        analysis_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (analysis_event_ == nullptr) {
+            throw std::runtime_error("Create analysis event failed");
+        }
+        try {
+            analyzer_ = std::thread([this] { AnalyzeLoop(); });
+        } catch (...) {
+            CloseHandle(analysis_event_);
+            analysis_event_ = nullptr;
+            throw;
+        }
+    }
+
+    void StopAnalyzer() noexcept {
+        if (analyzer_.joinable()) {
+            stop_analyzer_.store(true, std::memory_order_release);
+            SetEvent(analysis_event_);
+            analyzer_.join();
+        }
+        if (analysis_event_ != nullptr) {
+            CloseHandle(analysis_event_);
+            analysis_event_ = nullptr;
+        }
     }
 
     void StartCapture() {
@@ -208,6 +245,7 @@ public:
                     --warmupFrames_;
                     continue;
                 }
+                float frame_samples[2]{};
                 for (unsigned channel = 0; channel < 2; ++channel) {
                     float value = 0.0f;
                     if (!silent && format_.float32) {
@@ -217,7 +255,19 @@ public:
                                     [frame * 2 + channel] / 32768.0f;
                     }
                     if (!std::isfinite(value)) value = 0.0f;
-                    samples_.push_back(value);
+                    frame_samples[channel] = value;
+                }
+                pending_window_[pending_frames_ * 2] = frame_samples[0];
+                pending_window_[pending_frames_ * 2 + 1] = frame_samples[1];
+                if (++pending_frames_ == sar_driver::kProbeRate) {
+                    if (analysis_queue_.try_push(pending_window_.data(),
+                                                 pending_window_.size())) {
+                        if (!SetEvent(analysis_event_)) {
+                            analysis_signal_failures_.fetch_add(
+                                1, std::memory_order_relaxed);
+                        }
+                    }
+                    pending_frames_ = 0;
                 }
             }
             capturedFrames_ += frames;
@@ -228,29 +278,41 @@ public:
         }
     }
 
-    void AnalyzeReadyWindows() {
-        const std::size_t windowSamples = sar_driver::kProbeRate * 2;
-        while (samples_.size() - consumed_ >= windowSamples) {
-            const auto result = sar_driver::AnalyzeSignalWindow(
-                samples_.data() + consumed_, sar_driver::kProbeRate, bus_);
-            ++windows_;
-            if (!result.passed()) ++failedWindows_;
-            std::cout << "bus=" << bus_ << " window=" << windows_
-                      << " left=" << result.expected_power[0]
-                      << " right=" << result.expected_power[1]
-                      << " channel_leak_left=" << result.wrong_channel_power[0]
-                      << " channel_leak_right=" << result.wrong_channel_power[1]
-                      << " bus_leak_left=" << result.other_bus_power[0]
-                      << " bus_leak_right=" << result.other_bus_power[1]
-                      << " peak=" << result.peak_absolute_sample
-                      << " clipped_samples=" << result.clipped_samples
-                      << " non_finite_samples=" << result.non_finite_samples
-                      << " passed=" << static_cast<int>(result.passed()) << '\n';
-            consumed_ += windowSamples;
-        }
-        if (consumed_ != 0) {
-            samples_.erase(samples_.begin(), samples_.begin() + consumed_);
-            consumed_ = 0;
+    void AnalyzeLoop() {
+        for (;;) {
+            const DWORD wait = WaitForSingleObject(analysis_event_, 100);
+            if (wait == WAIT_TIMEOUT) {
+                if (stop_analyzer_.load(std::memory_order_acquire) &&
+                    analysis_queue_.queued_windows() == 0) {
+                    return;
+                }
+                continue;
+            }
+            if (wait != WAIT_OBJECT_0) {
+                analysis_wait_failures_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            while (analysis_queue_.try_consume_one(
+                [this](const float* samples, std::size_t) {
+                    const auto result = sar_driver::AnalyzeSignalWindow(
+                        samples, sar_driver::kProbeRate, bus_);
+                    ++windows_;
+                    if (!result.passed()) ++failed_windows_;
+                    const std::lock_guard<std::mutex> lock(g_analysis_output_mutex);
+                    std::cout << "bus=" << bus_ << " window=" << windows_
+                              << " left=" << result.expected_power[0]
+                              << " right=" << result.expected_power[1]
+                              << " channel_leak_left=" << result.wrong_channel_power[0]
+                              << " channel_leak_right=" << result.wrong_channel_power[1]
+                              << " bus_leak_left=" << result.other_bus_power[0]
+                              << " bus_leak_right=" << result.other_bus_power[1]
+                              << " peak=" << result.peak_absolute_sample
+                              << " clipped_samples=" << result.clipped_samples
+                              << " non_finite_samples=" << result.non_finite_samples
+                              << " passed=" << static_cast<int>(result.passed()) << '\n';
+                })) {
+            }
+            if (stop_analyzer_.load(std::memory_order_acquire)) return;
         }
     }
 
@@ -259,7 +321,11 @@ public:
     }
 
     bool ContentPassed(unsigned seconds) const {
-        return windows_ >= seconds - 2 && failedWindows_ == 0;
+        return windows_ >= seconds - 2 && failed_windows_ == 0 &&
+               analysis_queue_.dropped_windows() == 0 &&
+               analysis_queue_.invalid_pushes() == 0 &&
+               analysis_signal_failures_.load(std::memory_order_relaxed) == 0 &&
+               analysis_wait_failures_.load(std::memory_order_relaxed) == 0;
     }
 
     bool ContinuityPassed(unsigned seconds) const {
@@ -277,7 +343,13 @@ public:
                   << " max_packet_frames=" << maximumPacketFrames_
                   << " discontinuities=" << discontinuities_
                   << " windows=" << windows_
-                  << " failed_windows=" << failedWindows_ << '\n';
+                  << " failed_windows=" << failed_windows_
+                  << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()
+                  << " invalid_analysis_windows=" << analysis_queue_.invalid_pushes()
+                  << " analysis_signal_failures="
+                  << analysis_signal_failures_.load(std::memory_order_relaxed)
+                  << " analysis_wait_failures="
+                  << analysis_wait_failures_.load(std::memory_order_relaxed) << '\n';
     }
 
 private:
@@ -298,15 +370,21 @@ private:
     UINT32 maximumPacketFrames_ = 0;
     unsigned discontinuities_ = 0;
     std::size_t warmupFrames_ = 0;
-    std::size_t consumed_ = 0;
+    std::array<float, AnalysisQueue::kSamplesPerWindow> pending_window_{};
+    std::size_t pending_frames_ = 0;
+    AnalysisQueue analysis_queue_;
+    HANDLE analysis_event_ = nullptr;
+    std::thread analyzer_;
+    std::atomic_bool stop_analyzer_{false};
+    std::atomic_uint64_t analysis_signal_failures_{0};
+    std::atomic_uint64_t analysis_wait_failures_{0};
     unsigned windows_ = 0;
-    unsigned failedWindows_ = 0;
+    unsigned failed_windows_ = 0;
     bool renderStarted_ = false;
     bool captureStarted_ = false;
     Clock::time_point lastPacket_{};
     HANDLE renderEvent_ = nullptr;
     HANDLE captureEvent_ = nullptr;
-    std::vector<float> samples_;
     std::vector<std::array<std::int16_t, 2>> toneTable_;
 };
 
@@ -336,6 +414,7 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
                             firstBus + index, renderEvent, captureEvent);
     }
     try {
+        for (auto& stream : streams) stream.StartAnalyzer();
         for (auto& stream : streams) stream.StartCapture();
         for (auto& stream : streams) stream.StartRender();
         std::vector<std::size_t> readyEvents;
@@ -355,7 +434,6 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
             for (const std::size_t eventIndex : readyEvents) {
                 streams[eventIndex / 2].PumpEvent(eventIndex % 2);
             }
-            for (auto& stream : streams) stream.AnalyzeReadyWindows();
             const auto now = Clock::now();
             for (auto& stream : streams) {
                 if (now - start > std::chrono::seconds(1) && stream.Stalled(now)) {
@@ -364,8 +442,10 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
             }
         }
         for (auto& stream : streams) stream.Stop();
+        for (auto& stream : streams) stream.StopAnalyzer();
     } catch (...) {
         for (auto& stream : streams) stream.Stop();
+        for (auto& stream : streams) stream.StopAnalyzer();
         throw;
     }
     for (const auto& stream : streams) stream.Summary();
