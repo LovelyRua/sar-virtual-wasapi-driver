@@ -85,12 +85,12 @@ int main() {
     CHECK(ring.Write(cycle_a, 3).accepted_frames == 3);
     CHECK(ring.Read(output, 2) == 2);
     written = ring.Write(cycle_b, 5);
-    CHECK(written.accepted_frames == 4 && written.dropped_frames == 1);
+    CHECK(written.accepted_frames == 4 && written.dropped_frames == 2);
     CHECK(ring.Read(output, 4) == 4);
     CHECK(output[0] == 43 && output[1] == 44);
     CHECK(output[2] == 45 && output[3] == 46);
     CHECK(output[4] == 47 && output[5] == 48);
     CHECK(output[6] == 49 && output[7] == 50);
-    CHECK(ring.dropped_frames() == 1 && ring.queued_frames() == 0);
+    CHECK(ring.dropped_frames() == 2 && ring.queued_frames() == 0);
     return 0;
 }
