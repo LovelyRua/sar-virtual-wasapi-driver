@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <thread>
 
 namespace {
@@ -167,13 +168,27 @@ bool test_single_producer_consumer_publication() {
 }  // namespace
 
 int main() {
-    return test_rejects_invalid_windows() &&
-                   test_preserves_fifo_order_and_samples() &&
-                   test_full_queue_drops_without_overwriting() &&
-                   test_drop_counter_tracks_every_rejected_window() &&
-                   test_invalid_push_does_not_corrupt_queued_window() &&
-                   test_reuses_slots_after_consumer_releases_them() &&
-                   test_single_producer_consumer_publication()
-               ? 0
-               : 1;
+    const bool (*tests[])() = {
+        test_rejects_invalid_windows,
+        test_preserves_fifo_order_and_samples,
+        test_full_queue_drops_without_overwriting,
+        test_drop_counter_tracks_every_rejected_window,
+        test_invalid_push_does_not_corrupt_queued_window,
+        test_reuses_slots_after_consumer_releases_them,
+        test_single_producer_consumer_publication};
+    const char* names[] = {
+        "invalid windows",
+        "FIFO order and samples",
+        "full queue preserves existing data",
+        "drop counter accounting",
+        "invalid push preserves queued data",
+        "slot reuse",
+        "SPSC publication stress"};
+    for (std::size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); ++index) {
+        if (!tests[index]()) {
+            std::fprintf(stderr, "FAIL: %s\n", names[index]);
+            return 1;
+        }
+    }
+    return 0;
 }
