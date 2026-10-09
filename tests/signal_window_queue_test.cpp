@@ -153,6 +153,10 @@ bool test_single_producer_consumer_publication() {
     Queue queue;
     std::atomic_bool producer_done{false};
     std::atomic_bool valid{true};
+    unsigned failure_reason = 0;
+    unsigned failure_expected = 0;
+    std::size_t failure_sample = 0;
+    unsigned failure_actual = 0;
     std::thread producer([&] {
         std::array<float, kSamples> window{};
         for (unsigned id = 1; id <= kWindowCount; ++id) {
@@ -171,11 +175,17 @@ bool test_single_producer_consumer_publication() {
             [&](const float* samples, std::size_t count) {
                 if (count != kSamples) {
                     valid.store(false, std::memory_order_relaxed);
+                    failure_reason = 1;
+                    failure_expected = expected;
                     return;
                 }
                 for (std::size_t sample = 0; sample < count; ++sample) {
                     if (samples[sample] != static_cast<float>(expected * 100 + sample)) {
                         valid.store(false, std::memory_order_relaxed);
+                        failure_reason = 2;
+                        failure_expected = expected;
+                        failure_sample = sample;
+                        failure_actual = static_cast<unsigned>(samples[sample]);
                         return;
                     }
                 }
@@ -184,13 +194,23 @@ bool test_single_producer_consumer_publication() {
             ++expected;
         } else if (producer_done.load(std::memory_order_acquire)) {
             valid.store(false, std::memory_order_relaxed);
+            failure_reason = 3;
+            failure_expected = expected;
             break;
         } else {
             std::this_thread::yield();
         }
     }
     producer.join();
-    return valid.load(std::memory_order_relaxed) && queue.queued_windows() == 0;
+    const bool passed = valid.load(std::memory_order_relaxed) && queue.queued_windows() == 0;
+    if (!passed) {
+        std::fprintf(stderr,
+                     "SPSC stress details: reason=%u expected=%u sample=%zu actual=%u queued=%zu dropped=%llu\n",
+                     failure_reason, failure_expected, failure_sample, failure_actual,
+                     queue.queued_windows(),
+                     static_cast<unsigned long long>(queue.dropped_windows()));
+    }
+    return passed;
 }
 
 }  // namespace
