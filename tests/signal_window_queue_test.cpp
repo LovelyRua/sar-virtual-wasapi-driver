@@ -127,6 +127,30 @@ bool test_reuses_slots_after_consumer_releases_them() {
     return queue.queued_windows() == 0 && queue.dropped_windows() == 0;
 }
 
+bool test_multiple_queue_wraps_keep_window_edges_intact() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    for (unsigned cycle = 1; cycle <= 1000; ++cycle) {
+        for (unsigned slot = 0; slot < 3; ++slot) {
+            window.fill(static_cast<float>(cycle * 3 + slot));
+            if (!queue.try_push(window.data(), window.size())) return false;
+        }
+        for (unsigned slot = 0; slot < 3; ++slot) {
+            const float expected = static_cast<float>(cycle * 3 + slot);
+            bool intact = false;
+            if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+                    intact = count == kSamples && samples[0] == expected &&
+                             samples[count / 2] == expected &&
+                             samples[count - 1] == expected;
+                }) || !intact) {
+                return false;
+            }
+        }
+    }
+    return queue.queued_windows() == 0 && queue.dropped_windows() == 0 &&
+           queue.invalid_pushes() == 0;
+}
+
 bool test_full_queue_keeps_oldest_windows_and_rejects_newest() {
     Queue queue;
     std::array<float, kSamples> window{};
@@ -224,6 +248,7 @@ int main() {
         test_invalid_push_does_not_corrupt_queued_window,
         test_reuses_slots_after_consumer_releases_them,
         test_full_queue_keeps_oldest_windows_and_rejects_newest,
+        test_multiple_queue_wraps_keep_window_edges_intact,
         test_single_producer_consumer_publication};
     const char* names[] = {
         "invalid windows",
@@ -233,6 +258,7 @@ int main() {
         "invalid push preserves queued data",
         "slot reuse",
         "full queue preserves oldest windows",
+        "repeated queue wraps preserve window edges",
         "SPSC publication stress"};
     for (std::size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); ++index) {
         if (!tests[index]()) {

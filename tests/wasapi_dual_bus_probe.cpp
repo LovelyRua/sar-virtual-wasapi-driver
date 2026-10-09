@@ -8,6 +8,7 @@
 #include "src/dual_bus_signal.h"
 #include "src/wasapi_event_pump.h"
 #include "src/signal_window_queue.h"
+#include "src/wasapi_capture_timeline.h"
 #include "src/wasapi_probe_options.h"
 
 #include <algorithm>
@@ -229,9 +230,17 @@ public:
             BYTE* bytes = nullptr;
             UINT32 frames = 0;
             DWORD flags = 0;
-            Check(reader_->GetBuffer(&bytes, &frames, &flags, nullptr, nullptr),
+            UINT64 devicePosition = 0;
+            UINT64 qpcPosition = 0;
+            Check(reader_->GetBuffer(&bytes, &frames, &flags,
+                                     &devicePosition, &qpcPosition),
                   "Get capture buffer");
             const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
+            timeline_.Observe(devicePosition, qpcPosition, frames,
+                              sar_driver::kProbeRate,
+                              (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
+                              silent,
+                              (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
             ++capturePackets_;
             if (frames > maximumPacketFrames_) maximumPacketFrames_ = frames;
             if (silent) ++silentPackets_;
@@ -337,6 +346,7 @@ public:
     }
 
     void Summary() const {
+        const auto& timeline = timeline_.stats();
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
@@ -344,6 +354,15 @@ public:
                   << " silent_packets=" << silentPackets_
                   << " max_packet_frames=" << maximumPacketFrames_
                   << " discontinuities=" << discontinuities_
+                  << " timeline_packets=" << timeline.packets
+                  << " timestamp_errors=" << timeline.timestamp_error_packets
+                  << " position_gap_packets=" << timeline.position_gap_packets
+                  << " position_gap_frames=" << timeline.position_gap_frames
+                  << " position_overlap_packets=" << timeline.position_overlap_packets
+                  << " position_overlap_frames=" << timeline.position_overlap_frames
+                  << " qpc_regressions=" << timeline.qpc_regressions
+                  << " max_qpc_delta_error_100ns="
+                  << timeline.maximum_qpc_delta_error_100ns
                   << " windows=" << windows_
                   << " failed_windows=" << failed_windows_
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()
@@ -371,6 +390,7 @@ private:
     std::uint64_t silentPackets_ = 0;
     UINT32 maximumPacketFrames_ = 0;
     unsigned discontinuities_ = 0;
+    sar_driver::WasapiCaptureTimeline timeline_;
     std::size_t warmupFrames_ = 0;
     std::array<float, AnalysisQueue::kSamplesPerWindow> pending_window_{};
     std::size_t pending_frames_ = 0;

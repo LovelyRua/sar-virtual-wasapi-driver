@@ -46,6 +46,14 @@ int main() {
         return 17;
     }
 
+    for (unsigned cycle = 0; cycle < 1024; ++cycle) {
+        if (!SetEvent(second) || pump.Wait(0, ready) != WAIT_OBJECT_0 ||
+            ready.size() != 1 || ready[0] != 1 ||
+            pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) {
+            return 23;
+        }
+    }
+
     // All signaled clients must be drained in a single service pass in stable order.
     sar_driver::WasapiEventPump four_bus_pump;
     std::vector<HANDLE> four_bus_events;

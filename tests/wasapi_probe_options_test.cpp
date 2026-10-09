@@ -38,6 +38,14 @@ bool test_duration_bounds_and_overflow() {
            !parse(overflow.data(), 6, options);
 }
 
+bool test_duration_inclusive_limits() {
+    const std::array<const wchar_t*, 6> minimum{{L"probe", L"r0", L"c0", L"r1", L"c1", L"5"}};
+    const std::array<const wchar_t*, 6> maximum{{L"probe", L"r0", L"c0", L"r1", L"c1", L"3600"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(minimum.data(), 6, options) && options.duration_seconds == 5 &&
+           parse(maximum.data(), 6, options) && options.duration_seconds == 3600;
+}
+
 bool test_numeric_arguments_require_ascii_decimal_digits() {
     const std::array<const wchar_t*, 6> signed_bus{{L"probe", L"--single", L"+0", L"r", L"c", L"5"}};
     const std::array<const wchar_t*, 6> negative_zero{{L"probe", L"--single", L"-0", L"r", L"c", L"5"}};
@@ -173,6 +181,7 @@ int main() {
     return test_legacy_two_pair_syntax() &&
                    test_legacy_syntax_rejects_extra_arguments() &&
                    test_duration_bounds_and_overflow() &&
+                   test_duration_inclusive_limits() &&
                    test_numeric_arguments_require_ascii_decimal_digits() &&
                    test_single_mode_accepts_last_bus() &&
                    test_single_mode_rejects_out_of_range_bus() &&

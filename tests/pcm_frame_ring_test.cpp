@@ -107,6 +107,35 @@ int main() {
     CHECK(output[6] == 49 && output[7] == 50);
     CHECK(ring.dropped_frames() == 2 && ring.queued_frames() == 0);
 
+    // Splitting a producer write into packet-sized chunks must preserve the
+    // same FIFO stream as one contiguous write when the ring has headroom.
+    uint8_t chunked_storage[40] = {};
+    uint8_t contiguous_storage[40] = {};
+    PcmFrameRing chunked;
+    PcmFrameRing contiguous;
+    CHECK(chunked.Initialize(chunked_storage, 10, 4));
+    CHECK(contiguous.Initialize(contiguous_storage, 10, 4));
+    uint8_t packet[24] = {};
+    for (size_t frame = 0; frame < 6; ++frame) {
+        for (size_t byte = 0; byte < 4; ++byte) {
+            packet[frame * 4 + byte] = static_cast<uint8_t>(frame * 7 + byte);
+        }
+    }
+    CHECK(contiguous.Write(packet, 6).accepted_frames == 6);
+    CHECK(chunked.Write(packet, 2).accepted_frames == 2);
+    CHECK(chunked.Write(packet + 8, 1).accepted_frames == 1);
+    CHECK(chunked.Write(packet + 12, 3).accepted_frames == 3);
+    uint8_t chunked_output[24] = {};
+    uint8_t contiguous_output[24] = {};
+    CHECK(chunked.Read(chunked_output, 1) == 1);
+    CHECK(chunked.Read(chunked_output + 4, 5) == 5);
+    CHECK(contiguous.Read(contiguous_output, 6) == 6);
+    for (size_t byte = 0; byte < sizeof(packet); ++byte) {
+        CHECK(chunked_output[byte] == packet[byte]);
+        CHECK(contiguous_output[byte] == packet[byte]);
+    }
+    CHECK(chunked.queued_frames() == 0 && contiguous.queued_frames() == 0);
+
     // Compare long mixed read/write/reset sequences against a simple FIFO model.
     uint8_t model_storage[30] = {};
     PcmFrameRing model_ring;

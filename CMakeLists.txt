@@ -45,6 +45,16 @@ else()
 endif()
 add_test(NAME wasapi_probe_options_test COMMAND wasapi_probe_options_test)
 
+add_executable(wasapi_capture_timeline_test tests/wasapi_capture_timeline_test.cpp)
+target_compile_features(wasapi_capture_timeline_test PRIVATE cxx_std_17)
+target_include_directories(wasapi_capture_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(wasapi_capture_timeline_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(wasapi_capture_timeline_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME wasapi_capture_timeline_test COMMAND wasapi_capture_timeline_test)
+
 if(WIN32)
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_sources(sar_device_instances PRIVATE

@@ -49,6 +49,22 @@ void TestPairedBuses() {
     }
 }
 
+void TestProbeToneIsIndependentOfPacketBoundaries() {
+    constexpr std::array<unsigned, 5> packetSizes{{1, 127, 480, 1024, 4096}};
+    for (unsigned bus = 0; bus < sar_driver::kProbeBuses; ++bus) {
+        std::uint64_t frame = 0;
+        for (const unsigned packetSize : packetSizes) {
+            for (unsigned offset = 0; offset < packetSize; ++offset) {
+                const auto whole = ProbeFrame(bus, frame);
+                const auto wrapped = ProbeFrame(bus, frame % kProbeRate);
+                Expect(whole == wrapped,
+                       "tone phase must remain stable across render packet boundaries");
+                ++frame;
+            }
+        }
+    }
+}
+
 void TestSilenceAndMissingChannel() {
     std::vector<float> silence(kProbeRate * 2, 0.0f);
     const auto zero = AnalyzeSignalWindow(silence.data(), kProbeRate, 0);
@@ -218,6 +234,7 @@ void TestSignalThresholdBoundaries() {
 
 int main() {
     TestPairedBuses();
+    TestProbeToneIsIndependentOfPacketBoundaries();
     TestSilenceAndMissingChannel();
     TestSwappedAndDuplicatedChannels();
     TestCrossBusAndAttenuation();
