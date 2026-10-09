@@ -127,6 +127,31 @@ bool test_null_argument_array_is_rejected() {
            !error.empty();
 }
 
+bool test_failure_clears_previously_published_options() {
+    const std::array<const wchar_t*, 6> valid{{L"probe", L"--single", L"2",
+                                               L"render", L"capture", L"15"}};
+    const std::array<const wchar_t*, 6> invalid{{L"probe", L"--single", L"2",
+                                                 L"render", L"capture", L"4"}};
+    sar_driver::WasapiProbeOptions options;
+    std::wstring error;
+    if (!sar_driver::ParseWasapiProbeOptions(6, valid.data(), options, error) ||
+        options.pair_count != 1 || options.first_bus != 2) return false;
+    if (sar_driver::ParseWasapiProbeOptions(6, invalid.data(), options, error)) return false;
+    return options.duration_seconds == 0 && options.first_bus == 0 &&
+           options.pair_count == 0 && options.endpoint_ids[0] == nullptr &&
+           options.endpoint_ids[1] == nullptr && !error.empty();
+}
+
+bool test_null_mode_argument_is_rejected_and_clears_error_state() {
+    const std::array<const wchar_t*, 2> args{{L"probe", nullptr}};
+    sar_driver::WasapiProbeOptions options;
+    options.duration_seconds = 33;
+    std::wstring error = L"stale";
+    if (sar_driver::ParseWasapiProbeOptions(2, args.data(), options, error)) return false;
+    return options.duration_seconds == 0 && options.pair_count == 0 &&
+           options.endpoint_ids[0] == nullptr && error == L"Missing probe arguments.";
+}
+
 }  // namespace
 
 int main() {
@@ -145,6 +170,8 @@ int main() {
                    test_multi_mode_rejects_cross_flow_duplicate_endpoint() &&
                    test_single_mode_allows_independent_endpoint_pair() &&
                    test_invalid_reused_endpoint_does_not_publish_partial_options() &&
+                   test_failure_clears_previously_published_options() &&
+                   test_null_mode_argument_is_rejected_and_clears_error_state() &&
                    test_null_argument_array_is_rejected()
                ? 0
                : 1;

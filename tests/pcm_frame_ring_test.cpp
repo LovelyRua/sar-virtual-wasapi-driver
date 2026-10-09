@@ -1,7 +1,12 @@
 #include "src/pcm_frame_ring.h"
 
+#include <array>
+#include <cstdint>
 #include <limits>
 #include <stdint.h>
+#include <deque>
+#include <random>
+#include <vector>
 
 using sar_driver::PcmFrameRing;
 
@@ -92,5 +97,71 @@ int main() {
     CHECK(output[4] == 47 && output[5] == 48);
     CHECK(output[6] == 49 && output[7] == 50);
     CHECK(ring.dropped_frames() == 2 && ring.queued_frames() == 0);
+
+    // Compare long mixed read/write/reset sequences against a simple FIFO model.
+    uint8_t model_storage[30] = {};
+    PcmFrameRing model_ring;
+    CHECK(model_ring.Initialize(model_storage, 10, 3));
+    std::deque<std::array<uint8_t, 3>> model;
+    std::mt19937 random(0x534152u);
+    uint64_t model_dropped = 0;
+    uint64_t model_silent = 0;
+    for (unsigned operation = 0; operation < 2000; ++operation) {
+        if (operation % 97 == 0) {
+            model_ring.Reset();
+            model.clear();
+            model_dropped = 0;
+            model_silent = 0;
+            continue;
+        }
+        if ((random() & 1u) == 0) {
+            const size_t frames = random() % 16;
+            std::vector<uint8_t> input(frames * 3);
+            for (size_t frame = 0; frame < frames; ++frame) {
+                for (size_t byte = 0; byte < 3; ++byte) {
+                    input[frame * 3 + byte] = static_cast<uint8_t>(operation + frame + byte);
+                }
+            }
+            const auto result = model_ring.Write(input.data(), frames);
+            const size_t skip = frames > 10 ? frames - 10 : 0;
+            const size_t accepted = frames - skip;
+            const size_t overflow = accepted > 10 - model.size()
+                                        ? accepted - (10 - model.size()) : 0;
+            const size_t dropped = skip + overflow;
+            for (size_t frame = skip; frame < frames; ++frame) {
+                if (model.size() == 10) {
+                    model.pop_front();
+                    ++model_dropped;
+                }
+                std::array<uint8_t, 3> item{};
+                for (size_t byte = 0; byte < 3; ++byte) {
+                    item[byte] = input[frame * 3 + byte];
+                }
+                model.push_back(item);
+            }
+            model_dropped += skip;
+            CHECK(result.accepted_frames == accepted);
+            CHECK(result.dropped_frames == dropped);
+            CHECK(result.queued_frames == model.size());
+        } else {
+            const size_t frames = random() % 16;
+            std::vector<uint8_t> actual(frames * 3, 0xA5);
+            const size_t expected = frames < model.size() ? frames : model.size();
+            CHECK(model_ring.Read(actual.data(), frames) == expected);
+            for (size_t frame = 0; frame < expected; ++frame) {
+                for (size_t byte = 0; byte < 3; ++byte) {
+                    CHECK(actual[frame * 3 + byte] == model.front()[byte]);
+                }
+                model.pop_front();
+            }
+            for (size_t byte = expected * 3; byte < actual.size(); ++byte) {
+                CHECK(actual[byte] == 0);
+            }
+            model_silent += frames - expected;
+        }
+        CHECK(model_ring.queued_frames() == model.size());
+        CHECK(model_ring.dropped_frames() == model_dropped);
+        CHECK(model_ring.silent_frames() == model_silent);
+    }
     return 0;
 }

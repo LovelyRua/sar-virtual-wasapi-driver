@@ -127,6 +127,27 @@ bool test_reuses_slots_after_consumer_releases_them() {
     return queue.queued_windows() == 0 && queue.dropped_windows() == 0;
 }
 
+bool test_full_queue_keeps_oldest_windows_and_rejects_newest() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    for (unsigned id = 1; id <= 9; ++id) {
+        window.fill(static_cast<float>(id));
+        const bool accepted = queue.try_push(window.data(), window.size());
+        if (accepted != (id <= 3)) return false;
+    }
+    if (queue.dropped_windows() != 6 || queue.queued_windows() != 3) return false;
+    for (unsigned expected = 1; expected <= 3; ++expected) {
+        bool intact = false;
+        if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+                intact = count == kSamples && samples[0] == expected &&
+                         samples[count - 1] == expected;
+            }) || !intact) {
+            return false;
+        }
+    }
+    return queue.queued_windows() == 0 && queue.dropped_windows() == 6;
+}
+
 bool test_single_producer_consumer_publication() {
     constexpr unsigned kWindowCount = 20000;
     Queue queue;
@@ -175,6 +196,7 @@ int main() {
         test_drop_counter_tracks_every_rejected_window,
         test_invalid_push_does_not_corrupt_queued_window,
         test_reuses_slots_after_consumer_releases_them,
+        test_full_queue_keeps_oldest_windows_and_rejects_newest,
         test_single_producer_consumer_publication};
     const char* names[] = {
         "invalid windows",
@@ -183,6 +205,7 @@ int main() {
         "drop counter accounting",
         "invalid push preserves queued data",
         "slot reuse",
+        "full queue preserves oldest windows",
         "SPSC publication stress"};
     for (std::size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); ++index) {
         if (!tests[index]()) {

@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <new>
 #include <vector>
 
 namespace sar_driver {
@@ -20,8 +21,19 @@ public:
     }
 
     HANDLE Create() {
+        if (events_.size() >= MAXIMUM_WAIT_OBJECTS) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return nullptr;
+        }
         HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (event != nullptr) events_.push_back(event);
+        if (event == nullptr) return nullptr;
+        try {
+            events_.push_back(event);
+        } catch (const std::bad_alloc&) {
+            CloseHandle(event);
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return nullptr;
+        }
         return event;
     }
 

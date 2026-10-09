@@ -1,7 +1,13 @@
 #include "src/wasapi_event_pump.h"
 
 #include <cstddef>
+#include <type_traits>
 #include <vector>
+
+static_assert(!std::is_copy_constructible<sar_driver::WasapiEventPump>::value,
+              "event handles must have exactly one owner");
+static_assert(!std::is_copy_assignable<sar_driver::WasapiEventPump>::value,
+              "event handles must not be copied");
 
 int main() {
     sar_driver::WasapiEventPump pump;
@@ -23,9 +29,18 @@ int main() {
     }
     if (pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 5;
 
+    ready.push_back(99);
+    if (pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 16;
+
     if (!SetEvent(second) || pump.Wait(0, ready) != WAIT_OBJECT_0 ||
         ready.size() != 1 || ready[0] != 1) {
         return 6;
+    }
+
+    if (!SetEvent(first) ||
+        pump.Wait(0, ready) != WAIT_OBJECT_0 || ready.size() != 1 || ready[0] != 0 ||
+        pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) {
+        return 17;
     }
 
     // All signaled clients must be drained in a single service pass in stable order.
@@ -52,7 +67,9 @@ int main() {
         if (maximum_pump.Create() == nullptr) return 12;
     }
     if (maximum_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 13;
-    if (maximum_pump.Create() == nullptr) return 14;
-    if (maximum_pump.Wait(0, ready) != WAIT_FAILED || !ready.empty()) return 15;
+    SetLastError(ERROR_SUCCESS);
+    if (maximum_pump.Create() != nullptr || GetLastError() != ERROR_INVALID_PARAMETER) return 14;
+    if (maximum_pump.size() != MAXIMUM_WAIT_OBJECTS ||
+        maximum_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 15;
     return 0;
 }

@@ -181,6 +181,33 @@ void TestSampleIntegrity() {
            "any non-finite or clipped sample must fail integrity");
 }
 
+void TestSignalThresholdBoundaries() {
+    auto clean = MakeWindow(1);
+    const auto baseline = AnalyzeSignalWindow(clean.data(), kProbeRate, 1);
+    Expect(baseline.passed(), "reference signal must pass before threshold checks");
+
+    auto atClipBoundary = clean;
+    atClipBoundary[0] = 0.999f;
+    const auto boundary = AnalyzeSignalWindow(atClipBoundary.data(), kProbeRate, 1);
+    Expect(!boundary.sample_integrity_ok,
+           "the documented inclusive clipping boundary must fail integrity");
+    Expect(boundary.clipped_samples == 1,
+           "the inclusive clipping boundary must count exactly once");
+
+    auto justBelowBoundary = clean;
+    justBelowBoundary[0] = std::nextafter(0.999f, 0.0f);
+    const auto below = AnalyzeSignalWindow(justBelowBoundary.data(), kProbeRate, 1);
+    Expect(below.sample_integrity_ok,
+           "a finite sample immediately below clipping boundary must remain valid");
+
+    const auto strictThreshold = AnalyzeSignalWindow(
+        clean.data(), kProbeRate, 1, baseline.expected_power[0] * 1.01);
+    Expect(!strictThreshold.enough_signal,
+           "a threshold above measured channel power must reject the signal");
+    Expect(strictThreshold.expected_power[1] == baseline.expected_power[1],
+           "threshold rejection must preserve measured channel diagnostics");
+}
+
 } // namespace
 
 int main() {
@@ -190,6 +217,7 @@ int main() {
     TestCrossBusAndAttenuation();
     TestInvalidInput();
     TestSampleIntegrity();
+    TestSignalThresholdBoundaries();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;
