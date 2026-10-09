@@ -358,3 +358,32 @@ glitch-free release driver.
 The stress-run experimental device, INF, and temporary certificate were
 removed from VM24 after testing. All firewall profiles remained enabled;
 its user-authorized test-signing boot mode remains active.
+
+## Instance readiness and continuity retest (2026-10-09)
+
+The `e88e3b8` manager and driver package passed CI and were installed on VM24
+with a short-lived test certificate. Each of two simultaneously installed
+instances independently reached `ready`: two active render and two active
+capture endpoints, all with 48 kHz stereo mix formats, parented to the correct
+`ROOT\MEDIA\0001` or `ROOT\MEDIA\0002`, across three consecutive samples.
+Removing instance 0001 left instance 0002 ready; removing 0002 returned the
+present Media-device inventory to the pre-test VB-Cable-only baseline. The new
+`oem12.inf` and temporary certificate were removed; pre-existing `oem10.inf`
+and `oem11.inf` were retained. Secure Boot/test-signing and firewall settings
+were unchanged, and the detailed probe logs remain on VM24 under
+`C:\sar-lab\readiness-e88e3b8`.
+
+The interactive two-instance 15-second WASAPI probe measured target tones on
+all analyzed windows, zero silent frames, and very low wrong-channel/cross-bus
+power. It **failed continuity**: bus 0 reported 134 discontinuities and
+662112 captured versus 699456 sent frames; bus 1 reported 86 discontinuities
+and 681120 captured versus 691104 sent frames. A serial single-instance SAR
+run also failed with 120 discontinuities, 12 valid windows, and 669984 captured
+versus 683520 sent frames. The same-session VB-Cable control failed the strict
+continuity gate too, but less severely: 19 discontinuities, 13 valid windows,
+and 712032 captured versus 712800 sent frames. This demonstrates correct
+signal content and endpoint attribution, but exposes a substantial SAR-path
+continuity regression beyond the control baseline. Do not describe the current
+two-instance path as glitch-free or release-ready; investigate stream pacing,
+queue behavior, and VM scheduling before increasing the supported instance
+limit or claiming stable multi-device operation.
