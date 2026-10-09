@@ -38,6 +38,21 @@ bool test_duration_bounds_and_overflow() {
            !parse(overflow.data(), 6, options);
 }
 
+bool test_numeric_arguments_require_ascii_decimal_digits() {
+    const std::array<const wchar_t*, 6> signed_bus{{L"probe", L"--single", L"+0", L"r", L"c", L"5"}};
+    const std::array<const wchar_t*, 6> negative_zero{{L"probe", L"--single", L"-0", L"r", L"c", L"5"}};
+    const std::array<const wchar_t*, 6> padded_duration{{L"probe", L"r0", L"c0", L"r1", L"c1", L" 5"}};
+    const std::array<const wchar_t*, 6> decimal_duration{{L"probe", L"r0", L"c0", L"r1", L"c1", L"5.0"}};
+    const std::array<const wchar_t*, 6> leading_zeroes{{L"probe", L"--single", L"0003", L"r", L"c", L"0005"}};
+    sar_driver::WasapiProbeOptions options;
+    return !parse(signed_bus.data(), 6, options) &&
+           !parse(negative_zero.data(), 6, options) &&
+           !parse(padded_duration.data(), 6, options) &&
+           !parse(decimal_duration.data(), 6, options) &&
+           parse(leading_zeroes.data(), 6, options) &&
+           options.first_bus == 3 && options.duration_seconds == 5;
+}
+
 bool test_single_mode_accepts_last_bus() {
     const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"3", L"r3", L"c3", L"5"}};
     sar_driver::WasapiProbeOptions options;
@@ -158,6 +173,7 @@ int main() {
     return test_legacy_two_pair_syntax() &&
                    test_legacy_syntax_rejects_extra_arguments() &&
                    test_duration_bounds_and_overflow() &&
+                   test_numeric_arguments_require_ascii_decimal_digits() &&
                    test_single_mode_accepts_last_bus() &&
                    test_single_mode_rejects_out_of_range_bus() &&
                    test_single_mode_rejects_missing_id() &&

@@ -410,11 +410,15 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
         streams[index].Open(enumerator.Get(), ids[index * 2], ids[index * 2 + 1],
                             firstBus + index, renderEvent, captureEvent);
     }
+    std::vector<std::size_t> readyEvents;
+    if (!eventPump.Prepare(readyEvents)) {
+        throw std::runtime_error("Prepare WASAPI event buffer failed: " +
+                                 std::to_string(GetLastError()));
+    }
     try {
         for (auto& stream : streams) stream.StartAnalyzer();
         for (auto& stream : streams) stream.StartCapture();
         for (auto& stream : streams) stream.StartRender();
-        std::vector<std::size_t> readyEvents;
         for (const auto& stream : streams) {
             if (stream.renderEvent() == nullptr || stream.captureEvent() == nullptr) {
                 throw std::runtime_error("WASAPI event was not initialized");

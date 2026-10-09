@@ -199,6 +199,11 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     if (renderEvent == nullptr || captureEvent == nullptr) {
         throw std::runtime_error("Create WASAPI event failed");
     }
+    std::vector<size_t> readyEvents;
+    if (!eventPump.Prepare(readyEvents)) {
+        throw std::runtime_error("Prepare WASAPI event buffer failed: " +
+                                 std::to_string(GetLastError()));
+    }
     Check(render->SetEventHandle(renderEvent), "Set render event");
     Check(capture->SetEventHandle(captureEvent), "Set capture event");
 
@@ -218,7 +223,6 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     UINT64 discontinuityPackets = 0;
     UINT32 maximumPacketFrames = 0;
     const auto begin = std::chrono::steady_clock::now();
-    std::vector<size_t> readyEvents;
     while (std::chrono::steady_clock::now() - begin < std::chrono::seconds(4)) {
         const DWORD wait = eventPump.Wait(50, readyEvents);
         if (wait == WAIT_FAILED) {

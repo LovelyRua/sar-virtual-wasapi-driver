@@ -37,10 +37,29 @@ public:
         return event;
     }
 
+    // Reserve on the control thread before starting streams; Wait never allocates.
+    bool Prepare(std::vector<std::size_t>& ready) const noexcept {
+        if (events_.empty() || events_.size() > MAXIMUM_WAIT_OBJECTS) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return false;
+        }
+        try {
+            ready.reserve(events_.size());
+        } catch (...) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return false;
+        }
+        return true;
+    }
+
     DWORD Wait(DWORD timeout_ms, std::vector<std::size_t>& ready) const {
         ready.clear();
         if (events_.empty() || events_.size() > MAXIMUM_WAIT_OBJECTS) {
             SetLastError(ERROR_INVALID_PARAMETER);
+            return WAIT_FAILED;
+        }
+        if (ready.capacity() < events_.size()) {
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
             return WAIT_FAILED;
         }
 

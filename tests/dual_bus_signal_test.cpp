@@ -143,6 +143,12 @@ void TestInvalidInput() {
            "invalid threshold must fail");
     Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 0, 1e-5, 1.0).passed(),
            "invalid isolation ratio must fail");
+    const float one_sample = 0.25f;
+    Expect(sar_driver::TonePower(&one_sample,
+                                 std::numeric_limits<std::size_t>::max(), 0, 997) == 0.0,
+           "tone analyzer must reject frame counts that overflow interleaved indexing");
+    Expect(sar_driver::TonePower(&one_sample, 1, 2, 997) == 0.0,
+           "tone analyzer must reject channel indices outside stereo");
     Expect(ProbeFrame(4, 0) == std::array<std::int16_t, 2>{0, 0},
            "invalid bus generator must be silent");
     Expect(ProbeFrame(0, 0, 2.0) == std::array<std::int16_t, 2>{0, 0},

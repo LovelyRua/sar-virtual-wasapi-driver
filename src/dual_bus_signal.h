@@ -35,6 +35,7 @@ struct SignalWindow {
 inline double TonePower(const float* interleaved, std::size_t frames,
                         unsigned channel, unsigned frequency) {
     if (interleaved == nullptr || frames == 0 || channel >= kProbeChannels ||
+        frames > static_cast<std::size_t>(-1) / kProbeChannels ||
         frequency == 0 || frequency >= kProbeRate / 2) {
         return 0.0;
     }

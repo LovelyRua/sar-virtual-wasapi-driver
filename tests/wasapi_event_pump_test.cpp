@@ -22,6 +22,9 @@ int main() {
     const HANDLE first = pump.Create();
     const HANDLE second = pump.Create();
     if (first == nullptr || second == nullptr) return 2;
+    if (pump.Wait(0, ready) != WAIT_FAILED ||
+        GetLastError() != ERROR_INSUFFICIENT_BUFFER || !ready.empty()) return 18;
+    if (!pump.Prepare(ready) || ready.capacity() < pump.size()) return 19;
     if (!SetEvent(first) || !SetEvent(second)) return 3;
     if (pump.Wait(0, ready) != WAIT_OBJECT_0 || ready.size() != 2 ||
         ready[0] != 0 || ready[1] != 1) {
@@ -66,6 +69,7 @@ int main() {
     for (DWORD index = 0; index < MAXIMUM_WAIT_OBJECTS; ++index) {
         if (maximum_pump.Create() == nullptr) return 12;
     }
+    if (!maximum_pump.Prepare(ready) || ready.capacity() < maximum_pump.size()) return 20;
     if (maximum_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 13;
     SetLastError(ERROR_SUCCESS);
     if (maximum_pump.Create() != nullptr || GetLastError() != ERROR_INVALID_PARAMETER) return 14;

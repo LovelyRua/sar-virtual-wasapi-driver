@@ -11,14 +11,15 @@ namespace {
 bool parse_unsigned(const wchar_t* text, unsigned minimum, unsigned maximum,
                     unsigned& value) {
     if (text == nullptr || *text == L'\0') return false;
-    errno = 0;
-    wchar_t* end = nullptr;
-    const unsigned long parsed = std::wcstoul(text, &end, 10);
-    if (errno == ERANGE || end == text || *end != L'\0' ||
-        parsed < minimum || parsed > maximum) {
-        return false;
+    unsigned parsed = 0;
+    for (const wchar_t* cursor = text; *cursor != L'\0'; ++cursor) {
+        if (*cursor < L'0' || *cursor > L'9') return false;
+        const unsigned digit = static_cast<unsigned>(*cursor - L'0');
+        if (digit > maximum || parsed > (maximum - digit) / 10) return false;
+        parsed = parsed * 10 + digit;
     }
-    value = static_cast<unsigned>(parsed);
+    if (parsed < minimum || parsed > maximum) return false;
+    value = parsed;
     return true;
 }
 

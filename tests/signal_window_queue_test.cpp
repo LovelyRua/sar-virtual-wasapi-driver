@@ -156,7 +156,9 @@ bool test_single_producer_consumer_publication() {
     std::thread producer([&] {
         std::array<float, kSamples> window{};
         for (unsigned id = 1; id <= kWindowCount; ++id) {
-            window.fill(static_cast<float>(id));
+            for (std::size_t sample = 0; sample < kSamples; ++sample) {
+                window[sample] = static_cast<float>(id * 100 + sample);
+            }
             while (!queue.try_push(window.data(), window.size())) {
                 std::this_thread::yield();
             }
@@ -167,10 +169,15 @@ bool test_single_producer_consumer_publication() {
     for (unsigned expected = 1; expected <= kWindowCount;) {
         bool consumed = queue.try_consume_one(
             [&](const float* samples, std::size_t count) {
-                if (count != kSamples ||
-                    samples[0] != static_cast<float>(expected) ||
-                    samples[count - 1] != static_cast<float>(expected)) {
+                if (count != kSamples) {
                     valid.store(false, std::memory_order_relaxed);
+                    return;
+                }
+                for (std::size_t sample = 0; sample < count; ++sample) {
+                    if (samples[sample] != static_cast<float>(expected * 100 + sample)) {
+                        valid.store(false, std::memory_order_relaxed);
+                        return;
+                    }
                 }
             });
         if (consumed) {

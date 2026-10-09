@@ -20,6 +20,15 @@ int main() {
     CHECK(!ring.Initialize(storage, 4, 0));
     CHECK(ring.Initialize(storage, 4, 2));
 
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    CHECK(!ring.Initialize(storage, maximum / 2 + 1, 2));
+    const uint8_t retained[] = {91, 92};
+    CHECK(ring.Write(retained, 1).accepted_frames == 1);
+    CHECK(!ring.Initialize(nullptr, 4, 2));
+    uint8_t retained_output[2] = {};
+    CHECK(ring.Read(retained_output, 1) == 1);
+    CHECK(retained_output[0] == 91 && retained_output[1] == 92);
+
     const uint8_t first[] = {1, 2, 3, 4, 5, 6};
     auto written = ring.Write(first, 3);
     CHECK(written.accepted_frames == 3 && written.dropped_frames == 0 &&
@@ -77,7 +86,7 @@ int main() {
     CHECK(ring.queued_frames() == 0);
 
     // Reject byte-count overflow before touching caller memory.
-    const size_t overflow_frames = std::numeric_limits<size_t>::max() / 2 + 1;
+    const size_t overflow_frames = maximum / 2 + 1;
     written = ring.Write(first, overflow_frames);
     CHECK(written.accepted_frames == 0 && written.dropped_frames == 0);
     CHECK(ring.Read(output, overflow_frames) == 0);
