@@ -54,6 +54,7 @@ int main() {
         if (event == nullptr) return 7;
         four_bus_events.push_back(event);
     }
+    if (!four_bus_pump.Prepare(ready) || ready.capacity() < four_bus_pump.size()) return 21;
     for (HANDLE event : four_bus_events) {
         if (!SetEvent(event)) return 8;
     }
