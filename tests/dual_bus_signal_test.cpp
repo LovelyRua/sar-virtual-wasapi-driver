@@ -109,6 +109,22 @@ void TestCrossBusAndAttenuation() {
     Expect(!leakage.passed(), "strong bus bleed must fail");
     Expect(!leakage.bus_isolation_ok, "bus bleed must be reported");
 
+    auto lowLeakage = MakeWindow(2);
+    const auto quietBus = MakeWindow(0);
+    for (std::size_t index = 0; index < lowLeakage.size(); ++index) {
+        lowLeakage[index] += quietBus[index] * 0.01f;
+    }
+    Expect(AnalyzeSignalWindow(lowLeakage.data(), kProbeRate, 2).passed(),
+           "low-level unrelated bus must remain within isolation threshold");
+
+    auto swappedBusLeakage = MakeWindow(2);
+    for (std::size_t index = 0; index < swappedBusLeakage.size(); ++index) {
+        swappedBusLeakage[index] += quietBus[index] * 0.2f;
+    }
+    const auto busLeak = AnalyzeSignalWindow(swappedBusLeakage.data(), kProbeRate, 2);
+    Expect(!busLeak.passed() && !busLeak.bus_isolation_ok,
+           "above-threshold unrelated bus must fail isolation");
+
     auto attenuated = MakeWindow(0);
     for (float& value : attenuated) value *= 0.1f;
     Expect(AnalyzeSignalWindow(attenuated.data(), kProbeRate, 0).passed(),
@@ -150,6 +166,19 @@ void TestSampleIntegrity() {
     Expect(!nonFinite.passed(), "non-finite samples must fail the signal window");
     Expect(!nonFinite.sample_integrity_ok, "non-finite data must be reported");
     Expect(nonFinite.non_finite_samples == 1, "non-finite count must be exact");
+
+    auto multipleInvalid = MakeWindow(3);
+    multipleInvalid[0] = std::numeric_limits<float>::quiet_NaN();
+    multipleInvalid[1] = std::numeric_limits<float>::infinity();
+    multipleInvalid[2] = -1.0f;
+    multipleInvalid[3] = 0.999f;
+    const auto invalidSummary = AnalyzeSignalWindow(multipleInvalid.data(), kProbeRate, 3);
+    Expect(invalidSummary.non_finite_samples == 2,
+           "all non-finite channel samples must be counted");
+    Expect(invalidSummary.clipped_samples == 2,
+           "positive and negative clipping boundaries must be counted");
+    Expect(!invalidSummary.sample_integrity_ok,
+           "any non-finite or clipped sample must fail integrity");
 }
 
 } // namespace

@@ -67,6 +67,48 @@ bool test_full_queue_drops_without_overwriting() {
     return true;
 }
 
+bool test_drop_counter_tracks_every_rejected_window() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    unsigned accepted = 0;
+    for (unsigned id = 1; id <= 12; ++id) {
+        window.fill(static_cast<float>(id));
+        accepted += queue.try_push(window.data(), window.size()) ? 1u : 0u;
+    }
+    if (accepted != 3 || queue.dropped_windows() != 9 ||
+        queue.queued_windows() != 3) {
+        return false;
+    }
+    for (unsigned expected = 1; expected <= 3; ++expected) {
+        if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+                if (count != kSamples || samples[0] != expected ||
+                    samples[count - 1] != expected) {
+                    accepted = 0;
+                }
+            }) || accepted == 0) {
+            return false;
+        }
+    }
+    return queue.queued_windows() == 0 && queue.dropped_windows() == 9;
+}
+
+bool test_invalid_push_does_not_corrupt_queued_window() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    window.fill(42.0F);
+    if (!queue.try_push(window.data(), window.size())) return false;
+    if (queue.try_push(nullptr, window.size()) ||
+        queue.try_push(window.data(), window.size() - 1)) {
+        return false;
+    }
+    bool intact = false;
+    return queue.try_consume_one([&](const float* samples, std::size_t count) {
+               intact = count == kSamples && samples[0] == 42.0F &&
+                        samples[count - 1] == 42.0F;
+           }) && intact && queue.invalid_pushes() == 2 &&
+           queue.dropped_windows() == 0 && queue.queued_windows() == 0;
+}
+
 bool test_reuses_slots_after_consumer_releases_them() {
     Queue queue;
     std::array<float, kSamples> window{};
@@ -128,6 +170,8 @@ int main() {
     return test_rejects_invalid_windows() &&
                    test_preserves_fifo_order_and_samples() &&
                    test_full_queue_drops_without_overwriting() &&
+                   test_drop_counter_tracks_every_rejected_window() &&
+                   test_invalid_push_does_not_corrupt_queued_window() &&
                    test_reuses_slots_after_consumer_releases_them() &&
                    test_single_producer_consumer_publication()
                ? 0

@@ -84,6 +84,42 @@ bool test_multi_mode_rejects_one_or_five_pairs() {
     return !parse(one.data(), 5, options) && !parse(five.data(), 13, options);
 }
 
+bool test_multi_mode_rejects_reused_render_endpoint() {
+    const std::array<const wchar_t*, 7> args{{L"probe", L"--multi", L"10", L"same-render", L"c0", L"SAME-RENDER", L"c1"}};
+    sar_driver::WasapiProbeOptions options;
+    return !parse(args.data(), 7, options);
+}
+
+bool test_multi_mode_rejects_reused_capture_endpoint() {
+    const std::array<const wchar_t*, 7> args{{L"probe", L"--multi", L"10", L"r0", L"same-capture", L"r1", L"same-capture"}};
+    sar_driver::WasapiProbeOptions options;
+    return !parse(args.data(), 7, options);
+}
+
+bool test_multi_mode_rejects_cross_flow_duplicate_endpoint() {
+    const std::array<const wchar_t*, 7> args{{L"probe", L"--multi", L"10", L"shared-id", L"c0", L"r1", L"shared-id"}};
+    sar_driver::WasapiProbeOptions options;
+    return !parse(args.data(), 7, options);
+}
+
+bool test_single_mode_allows_independent_endpoint_pair() {
+    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"1", L"render-id", L"capture-id", L"5"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(args.data(), 6, options) && options.pair_count == 1 &&
+           options.endpoint_ids[0] == L"render-id" &&
+           options.endpoint_ids[1] == L"capture-id";
+}
+
+bool test_invalid_reused_endpoint_does_not_publish_partial_options() {
+    const std::array<const wchar_t*, 7> args{{L"probe", L"--multi", L"10", L"r0", L"c0", L"r0", L"c1"}};
+    sar_driver::WasapiProbeOptions options;
+    options.duration_seconds = 99;
+    options.pair_count = 4;
+    if (parse(args.data(), 7, options)) return false;
+    return options.duration_seconds == 0 && options.pair_count == 0 &&
+           options.endpoint_ids[0].empty() && options.endpoint_ids[1].empty();
+}
+
 bool test_null_argument_array_is_rejected() {
     sar_driver::WasapiProbeOptions options;
     std::wstring error;
@@ -104,6 +140,11 @@ int main() {
                    test_multi_mode_accepts_four_pairs() &&
                    test_multi_mode_rejects_odd_endpoint_count() &&
                    test_multi_mode_rejects_one_or_five_pairs() &&
+                   test_multi_mode_rejects_reused_render_endpoint() &&
+                   test_multi_mode_rejects_reused_capture_endpoint() &&
+                   test_multi_mode_rejects_cross_flow_duplicate_endpoint() &&
+                   test_single_mode_allows_independent_endpoint_pair() &&
+                   test_invalid_reused_endpoint_does_not_publish_partial_options() &&
                    test_null_argument_array_is_rejected()
                ? 0
                : 1;

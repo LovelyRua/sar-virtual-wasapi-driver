@@ -1,5 +1,6 @@
 #include "src/pcm_frame_ring.h"
 
+#include <limits>
 #include <stdint.h>
 
 using sar_driver::PcmFrameRing;
@@ -64,5 +65,32 @@ int main() {
     CHECK(output[0] == 0 && output[1] == 0);
     CHECK(buses[1].Read(output, 1) == 1);
     CHECK(output[0] == 21 && output[1] == 22);
+
+    // Empty operations are no-ops, including null pointers with zero frames.
+    CHECK(ring.Write(nullptr, 0).accepted_frames == 0);
+    CHECK(ring.Read(nullptr, 0) == 0);
+    CHECK(ring.queued_frames() == 0);
+
+    // Reject byte-count overflow before touching caller memory.
+    const size_t overflow_frames = std::numeric_limits<size_t>::max() / 2 + 1;
+    written = ring.Write(first, overflow_frames);
+    CHECK(written.accepted_frames == 0 && written.dropped_frames == 0);
+    CHECK(ring.Read(output, overflow_frames) == 0);
+    CHECK(ring.queued_frames() == 0);
+
+    // Repeated wraparound must preserve frame boundaries and newest-data policy.
+    ring.Reset();
+    const uint8_t cycle_a[] = {31, 32, 33, 34, 35, 36};
+    const uint8_t cycle_b[] = {41, 42, 43, 44, 45, 46, 47, 48, 49, 50};
+    CHECK(ring.Write(cycle_a, 3).accepted_frames == 3);
+    CHECK(ring.Read(output, 2) == 2);
+    written = ring.Write(cycle_b, 5);
+    CHECK(written.accepted_frames == 4 && written.dropped_frames == 1);
+    CHECK(ring.Read(output, 4) == 4);
+    CHECK(output[0] == 43 && output[1] == 44);
+    CHECK(output[2] == 45 && output[3] == 46);
+    CHECK(output[4] == 47 && output[5] == 48);
+    CHECK(output[6] == 49 && output[7] == 50);
+    CHECK(ring.dropped_frames() == 1 && ring.queued_frames() == 0);
     return 0;
 }

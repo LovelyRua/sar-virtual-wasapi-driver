@@ -27,5 +27,32 @@ int main() {
         ready.size() != 1 || ready[0] != 1) {
         return 6;
     }
+
+    // All signaled clients must be drained in a single service pass in stable order.
+    sar_driver::WasapiEventPump four_bus_pump;
+    std::vector<HANDLE> four_bus_events;
+    for (unsigned index = 0; index < 8; ++index) {
+        const HANDLE event = four_bus_pump.Create();
+        if (event == nullptr) return 7;
+        four_bus_events.push_back(event);
+    }
+    for (HANDLE event : four_bus_events) {
+        if (!SetEvent(event)) return 8;
+    }
+    if (four_bus_pump.Wait(0, ready) != WAIT_OBJECT_0 || ready.size() != 8) {
+        return 9;
+    }
+    for (std::size_t index = 0; index < ready.size(); ++index) {
+        if (ready[index] != index) return 10;
+    }
+    if (four_bus_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 11;
+
+    sar_driver::WasapiEventPump maximum_pump;
+    for (DWORD index = 0; index < MAXIMUM_WAIT_OBJECTS; ++index) {
+        if (maximum_pump.Create() == nullptr) return 12;
+    }
+    if (maximum_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 13;
+    if (maximum_pump.Create() == nullptr) return 14;
+    if (maximum_pump.Wait(0, ready) != WAIT_FAILED || !ready.empty()) return 15;
     return 0;
 }
