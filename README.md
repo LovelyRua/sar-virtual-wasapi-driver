@@ -387,3 +387,38 @@ continuity regression beyond the control baseline. Do not describe the current
 two-instance path as glitch-free or release-ready; investigate stream pacing,
 queue behavior, and VM scheduling before increasing the supported instance
 limit or claiming stable multi-device operation.
+
+## Bridge diagnostics and VM24 retest (2026-10-09)
+
+Commit `7453129` passed the Windows Transport tests and the full pinned WDK
+build. The shared PCM ring now reports per-write queued depth and peak depth;
+`IAdapterCommon::BridgeGetStats` exposes queued/peak frames, dropped and
+silence-filled frames, invalid transfer bytes, and read/write calls under the
+bridge lock. The diagnostic snapshot is currently kernel-internal and is not
+yet surfaced by the user-mode manager or GUI. The WaveRT stream also clears a
+partial mono sample tail rather than leaving stale DMA-buffer data.
+
+On VM24, the exact CI package installed as `ROOT\MEDIA\0001`; its two render
+and two capture endpoints were active, parented to that instance, and exposed
+48 kHz stereo mix formats across three stable readiness samples. Both
+single-bus shared-mode probes passed with non-silent target tones:
+
+- Bus 0: 141312 rendered / 188256 captured frames; zero silent frames.
+- Bus 1: 136224 rendered / 189408 captured frames; zero silent frames.
+
+The 15-second simultaneous two-bus probe produced correct tone/channel and
+cross-bus analysis in all 12 windows per bus, with zero failed windows and zero
+silent frames, but **failed continuity**: bus 0 had 120 discontinuities
+(676992 sent / 666432 captured frames), and bus 1 had 136 (708096 / 659712).
+An identical 15-second VB-Cable single-bus control in the same interactive
+session also failed continuity with 121 discontinuities (706272 / 667104
+frames), zero silent frames, and zero failed analysis windows. This VM baseline
+is therefore highly discontinuous under the current probe and the SAR result
+does not isolate a driver-only cause. The stricter continuity acceptance gate
+remains unmet; these results are not evidence of glitch-free operation.
+
+The new `oem12.inf`, test instance, and temporary certificate were removed.
+Original `oem10.inf` and `oem11.inf` remain installed. Test-signing remains
+enabled, Secure Boot remains disabled, and all firewall profiles remain
+enabled as previously authorized. Probe reports are retained at
+`C:\sar-lab\bridge-diag-7453129\probe` on VM24.
