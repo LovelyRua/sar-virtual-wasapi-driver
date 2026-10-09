@@ -117,7 +117,7 @@ bool test_invalid_reused_endpoint_does_not_publish_partial_options() {
     options.pair_count = 4;
     if (parse(args.data(), 7, options)) return false;
     return options.duration_seconds == 0 && options.pair_count == 0 &&
-           options.endpoint_ids[0].empty() && options.endpoint_ids[1].empty();
+           options.endpoint_ids[0] == nullptr && options.endpoint_ids[1] == nullptr;
 }
 
 bool test_null_argument_array_is_rejected() {
