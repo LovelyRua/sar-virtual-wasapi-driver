@@ -48,13 +48,26 @@ bool test_qpc_regression_and_zero_rate_do_not_overflow() {
            timeline.stats().packets == 3;
 }
 
+bool test_extreme_positions_saturate_without_wrapping() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(1, 0, 1, 48000, false, false, false);
+    timeline.Observe(std::numeric_limits<std::uint64_t>::max() - 1,
+                     std::numeric_limits<std::uint64_t>::max(),
+                     8, 48000, false, false, false);
+    return timeline.stats().position_gap_packets == 1 &&
+           timeline.stats().position_gap_frames ==
+               std::numeric_limits<std::uint64_t>::max() - 3 &&
+           timeline.stats().packets == 2;
+}
+
 }  // namespace
 
 int main() {
     return test_contiguous_packets_have_no_frame_gaps() &&
                    test_gap_and_overlap_are_measured_in_frames() &&
                    test_timestamp_error_breaks_position_comparison_chain() &&
-                   test_qpc_regression_and_zero_rate_do_not_overflow()
+                   test_qpc_regression_and_zero_rate_do_not_overflow() &&
+                   test_extreme_positions_saturate_without_wrapping()
                ? 0
                : 1;
 }

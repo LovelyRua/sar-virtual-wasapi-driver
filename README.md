@@ -476,3 +476,40 @@ After the retest, only the newly added `ROOT\MEDIA\0001`, `oem12.inf`, its
 temporary signing certificate, and the unique probe staging directory were
 removed. Earlier `oem10.inf` and `oem11.inf`, test-signing mode, disabled Secure
 Boot, and all enabled firewall profiles were preserved.
+
+## Capture packet timeline diagnosis (2026-10-09)
+
+Commit `33645c7` adds per-packet WASAPI device-frame and QPC tracking to the
+multi-bus probe. It reports position gaps/overlaps, timestamp errors, QPC
+regressions, and maximum frame-clock/QPC delta error in addition to the
+`DATA_DISCONTINUITY` flag. The tracker has deterministic tests for contiguous
+packets, gaps, overlaps, invalid timestamps, QPC regressions, and arithmetic
+bounds. The probe does not use these diagnostic values to relax its strict
+zero-discontinuity acceptance gate.
+
+The first VM24 runs exposed a measurement issue: the probe synchronously
+printed every discontinuity from the capture servicing thread. Commit
+`441f995` removes that per-event output while preserving counters and the
+once-per-window analysis output. Treat runs before and after that change as
+different probe conditions, not directly comparable performance samples.
+
+With the quiet probe, a 60-second concurrent run produced 58 valid analysis
+windows per bus, no silent frames, no failed signal/channel/isolation windows,
+no timestamp errors, and no QPC regressions. A SAR-only two-bus run reported
+38 and 44 discontinuity packets with 23,808 and 26,688 device-position gap
+frames. A same-session concurrent VB-Cable/SAR control reported 22
+discontinuities and 13,728 gap frames on VB-Cable, and 32 discontinuities and
+16,416 gap frames on SAR. Both runs failed the strict continuity gate. The
+paired result shows the current VM and audio scheduling baseline is materially
+noisy; SAR was somewhat worse than VB-Cable in that sample, but these short
+runs do not establish the source or a stable comparative rate. Do not claim
+glitch-free or release-ready behavior from the successful content windows.
+
+The exact CI-built driver package reached stable readiness on VM24 with two
+active render and two active capture endpoints, all 48 kHz stereo. After the
+test, only the new `ROOT\MEDIA\0001`, its `oem12.inf`, and the temporary
+certificate were removed. The original VB-Cable and OEM driver packages were
+retained; certificate residual count was zero, all firewall profiles remained
+enabled, and the previously authorized test-signing/Secure-Boot lab settings
+were unchanged. Detailed probe output remains under
+`C:\sar-lab\continuity-33645c7` on VM24.
