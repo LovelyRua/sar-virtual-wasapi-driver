@@ -55,14 +55,28 @@ jobs:
           foreach ($name in @('ComponentizedAudioSample.inf', 'TabletAudioSample.sys', 'KeywordDetectorContosoAdapter.dll')) {
             Copy-Item -LiteralPath (Join-Path $evidence $name) -Destination $package
           }
-          $kitRoots = @('packages', 'C:/Program Files (x86)/Windows Kits', 'C:/Program Files/Windows Kits')
-          $inf2cat = Get-ChildItem $kitRoots -Recurse -File -Filter 'Inf2Cat.exe' -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | Select-Object -First 1
+          $pinnedToolDir = Join-Path $PWD 'packages/Microsoft.Windows.WDK.x64.10.0.28000.2526/c/bin/10.0.28000.0/x64'
+          $inf2catCandidates = @(
+            (Join-Path $pinnedToolDir 'Inf2Cat.exe')
+            (Join-Path (Join-Path (Split-Path $pinnedToolDir -Parent) 'x86') 'Inf2Cat.exe')
+          )
+          foreach ($root in @('C:/Program Files (x86)/Windows Kits/10/bin', 'C:/Program Files/Windows Kits/10/bin')) {
+            if (Test-Path -LiteralPath $root -PathType Container) {
+              foreach ($version in Get-ChildItem -LiteralPath $root -Directory) {
+                foreach ($architecture in @('x64', 'x86')) {
+                  $inf2catCandidates += Join-Path $version.FullName "$architecture/Inf2Cat.exe"
+                }
+              }
+            }
+          }
+          $inf2cat = $inf2catCandidates |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+            Select-Object -First 1
           if (-not $inf2cat) {
-            Get-ChildItem $kitRoots -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            $inf2catCandidates | ForEach-Object { Write-Host "Checked $_" }
             throw 'WDK Inf2Cat.exe was not found in restored packages or Windows Kits'
           }
-          & $inf2cat.FullName "/driver:$package" /os:10_25H2_X64 /verbose
+          & $inf2cat "/driver:$package" /os:10_25H2_X64 /verbose
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $package 'sysvad.cat'))) {
             throw 'Core package catalog generation failed'
           }
