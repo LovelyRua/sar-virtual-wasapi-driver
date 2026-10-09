@@ -247,9 +247,6 @@ public:
             if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0 &&
                 warmupFrames_ == 0) {
                 ++discontinuities_;
-                std::cout << "bus=" << bus_ << " discontinuity=" << discontinuities_
-                          << " capture_frame=" << capturedFrames_
-                          << " packet_frames=" << frames << '\n';
             }
             for (UINT32 frame = 0; frame < frames; ++frame) {
                 if (warmupFrames_ != 0) {
