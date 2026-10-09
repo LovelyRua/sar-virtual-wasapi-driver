@@ -19,12 +19,16 @@ struct SignalWindow {
     std::array<double, 2> expected_power{};
     std::array<double, 2> wrong_channel_power{};
     std::array<double, 2> other_bus_power{};
+    double peak_absolute_sample = 0.0;
+    std::size_t non_finite_samples = 0;
+    std::size_t clipped_samples = 0;
     bool enough_signal = false;
     bool channel_order_ok = false;
     bool bus_isolation_ok = false;
+    bool sample_integrity_ok = false;
 
     bool passed() const {
-        return enough_signal && channel_order_ok && bus_isolation_ok;
+        return enough_signal && channel_order_ok && bus_isolation_ok && sample_integrity_ok;
     }
 };
 
@@ -56,6 +60,18 @@ inline SignalWindow AnalyzeSignalWindow(const float* interleaved, std::size_t fr
         minimum_power <= 0.0 || isolation_ratio <= 1.0) {
         return result;
     }
+    for (std::size_t sample = 0; sample < frames * kProbeChannels; ++sample) {
+        const double value = interleaved[sample];
+        if (!std::isfinite(value)) {
+            ++result.non_finite_samples;
+            continue;
+        }
+        const double absolute = std::abs(value);
+        if (absolute > result.peak_absolute_sample) {
+            result.peak_absolute_sample = absolute;
+        }
+        if (absolute >= 0.999) ++result.clipped_samples;
+    }
     for (unsigned channel = 0; channel < kProbeChannels; ++channel) {
         result.expected_power[channel] = TonePower(
             interleaved, frames, channel, kProbeFrequencies[bus][channel]);
@@ -78,6 +94,8 @@ inline SignalWindow AnalyzeSignalWindow(const float* interleaved, std::size_t fr
                                   result.other_bus_power[0] * isolation_ratio &&
                               result.expected_power[1] >=
                                   result.other_bus_power[1] * isolation_ratio;
+    result.sample_integrity_ok = result.non_finite_samples == 0 &&
+                                 result.clipped_samples == 0;
     return result;
 }
 

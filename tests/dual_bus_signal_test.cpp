@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -127,6 +128,23 @@ void TestInvalidInput() {
            "generator phase must wrap after one second");
 }
 
+void TestSampleIntegrity() {
+    auto clipped = MakeWindow(0);
+    clipped[0] = 1.0f;
+    const auto clipping = AnalyzeSignalWindow(clipped.data(), kProbeRate, 0);
+    Expect(!clipping.passed(), "clipped samples must fail the signal window");
+    Expect(!clipping.sample_integrity_ok, "clipping must be an integrity failure");
+    Expect(clipping.clipped_samples == 1, "clipped sample count must be exact");
+    Expect(clipping.peak_absolute_sample == 1.0, "peak sample must be reported");
+
+    auto invalid = MakeWindow(0);
+    invalid[1] = std::numeric_limits<float>::quiet_NaN();
+    const auto nonFinite = AnalyzeSignalWindow(invalid.data(), kProbeRate, 0);
+    Expect(!nonFinite.passed(), "non-finite samples must fail the signal window");
+    Expect(!nonFinite.sample_integrity_ok, "non-finite data must be reported");
+    Expect(nonFinite.non_finite_samples == 1, "non-finite count must be exact");
+}
+
 } // namespace
 
 int main() {
@@ -135,6 +153,7 @@ int main() {
     TestSwappedAndDuplicatedChannels();
     TestCrossBusAndAttenuation();
     TestInvalidInput();
+    TestSampleIntegrity();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;

@@ -8,6 +8,8 @@
 #include <mmdeviceapi.h>
 #include <wrl/client.h>
 
+#include "src/wasapi_event_pump.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -180,14 +182,25 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     }
     const auto shareMode = exclusive ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
     const REFERENCE_TIME period = exclusive ? 200000 : 0;
-    Check(render->Initialize(shareMode, 0, 200000, period, &format.Format, nullptr),
+    const DWORD streamFlags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+    Check(render->Initialize(shareMode, streamFlags,
+                             exclusive ? 200000 : 0, period, &format.Format, nullptr),
            "Initialize render at 48 kHz 16-bit stereo");
     const HRESULT captureResult = capture->Initialize(
-        shareMode, 0, 200000, period,
+        shareMode, streamFlags, exclusive ? 200000 : 0, period,
         defaultCapture ? captureMixFormat : &format.Format, nullptr);
     if (captureMixFormat != nullptr) CoTaskMemFree(captureMixFormat);
     Check(captureResult, defaultCapture ? "Initialize capture at mix format"
                                         : "Initialize capture at 48 kHz 16-bit stereo");
+
+    sar_driver::WasapiEventPump eventPump;
+    const HANDLE renderEvent = eventPump.Create();
+    const HANDLE captureEvent = eventPump.Create();
+    if (renderEvent == nullptr || captureEvent == nullptr) {
+        throw std::runtime_error("Create WASAPI event failed");
+    }
+    Check(render->SetEventHandle(renderEvent), "Set render event");
+    Check(capture->SetEventHandle(captureEvent), "Set capture event");
 
     ComPtr<IAudioRenderClient> writer;
     ComPtr<IAudioCaptureClient> reader;
@@ -201,68 +214,91 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     std::vector<int16_t> received;
     UINT64 sentFrames = 0;
     UINT64 silentFrames = 0;
+    UINT64 capturePackets = 0;
+    UINT64 discontinuityPackets = 0;
+    UINT32 maximumPacketFrames = 0;
     const auto begin = std::chrono::steady_clock::now();
+    std::vector<size_t> readyEvents;
     while (std::chrono::steady_clock::now() - begin < std::chrono::seconds(4)) {
-        if (std::chrono::steady_clock::now() - begin < std::chrono::seconds(3)) {
-            UINT32 padding = 0;
-            Check(render->GetCurrentPadding(&padding), "Get render padding");
-            const UINT32 available = renderCapacity - padding;
-            if (available != 0) {
-                BYTE* bytes = nullptr;
-                Check(writer->GetBuffer(available, &bytes), "Get render buffer");
-                auto* output = reinterpret_cast<int16_t*>(bytes);
-                for (UINT32 frame = 0; frame < available; ++frame) {
-                    const double t = static_cast<double>(sentFrames + frame) / kSampleRate;
-                    output[frame * 2] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 997 * t));
-                    output[frame * 2 + 1] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 1501 * t));
-                }
-                Check(writer->ReleaseBuffer(available, 0), "Release render buffer");
-                sentFrames += available;
-            }
+        const DWORD wait = eventPump.Wait(50, readyEvents);
+        if (wait == WAIT_FAILED) {
+            const DWORD error = GetLastError();
+            throw std::runtime_error("Wait for audio events failed: " +
+                                     std::to_string(error));
         }
+        for (const size_t eventIndex : readyEvents) {
+            if (eventIndex == 0 &&
+                std::chrono::steady_clock::now() - begin < std::chrono::seconds(3)) {
+                UINT32 padding = 0;
+                Check(render->GetCurrentPadding(&padding), "Get render padding");
+                const UINT32 available = renderCapacity - padding;
+                if (available != 0) {
+                    BYTE* bytes = nullptr;
+                    Check(writer->GetBuffer(available, &bytes), "Get render buffer");
+                    auto* output = reinterpret_cast<int16_t*>(bytes);
+                    for (UINT32 frame = 0; frame < available; ++frame) {
+                        const double t = static_cast<double>(sentFrames + frame) / kSampleRate;
+                        output[frame * 2] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 997 * t));
+                        output[frame * 2 + 1] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 1501 * t));
+                    }
+                    Check(writer->ReleaseBuffer(available, 0), "Release render buffer");
+                    sentFrames += available;
+                }
+            }
 
-        UINT32 packetFrames = 0;
-        Check(reader->GetNextPacketSize(&packetFrames), "Get capture packet size");
-        while (packetFrames != 0) {
-            BYTE* bytes = nullptr;
-            DWORD flags = 0;
-            UINT32 frames = 0;
-            Check(reader->GetBuffer(&bytes, &frames, &flags, nullptr, nullptr), "Get capture buffer");
-            if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-                received.insert(received.end(), static_cast<size_t>(frames) * 2, 0);
-                silentFrames += frames;
-            } else {
-                if (defaultCapture) {
-                    for (UINT32 frame = 0; frame < frames; ++frame) {
-                        for (UINT32 channel = 0; channel < 2; ++channel) {
-                            const size_t index = frame * captureMixFormatChannels +
-                                                 std::min(channel, captureMixFormatChannels - 1);
-                            if (captureMixFloat) {
-                                const float value = reinterpret_cast<const float*>(bytes)[index];
-                                received.push_back(static_cast<int16_t>(
-                                    std::clamp(std::isfinite(value) ? value : 0.0f,
-                                               -1.0f, 1.0f) * 32767));
-                            } else {
-                                received.push_back(reinterpret_cast<const int16_t*>(bytes)[index]);
+            if (eventIndex == 1) {
+                UINT32 packetFrames = 0;
+                Check(reader->GetNextPacketSize(&packetFrames), "Get capture packet size");
+                while (packetFrames != 0) {
+                    BYTE* bytes = nullptr;
+                    DWORD flags = 0;
+                    UINT32 frames = 0;
+                    Check(reader->GetBuffer(&bytes, &frames, &flags, nullptr, nullptr), "Get capture buffer");
+                    ++capturePackets;
+                    maximumPacketFrames = std::max(maximumPacketFrames, frames);
+                    if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) {
+                        ++discontinuityPackets;
+                    }
+                    if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+                        received.insert(received.end(), static_cast<size_t>(frames) * 2, 0);
+                        silentFrames += frames;
+                    } else {
+                        if (defaultCapture) {
+                            for (UINT32 frame = 0; frame < frames; ++frame) {
+                                for (UINT32 channel = 0; channel < 2; ++channel) {
+                                    const size_t index = frame * captureMixFormatChannels +
+                                                         std::min(channel, captureMixFormatChannels - 1);
+                                    if (captureMixFloat) {
+                                        const float value = reinterpret_cast<const float*>(bytes)[index];
+                                        received.push_back(static_cast<int16_t>(
+                                            std::clamp(std::isfinite(value) ? value : 0.0f,
+                                                       -1.0f, 1.0f) * 32767));
+                                    } else {
+                                        received.push_back(reinterpret_cast<const int16_t*>(bytes)[index]);
+                                    }
+                                }
                             }
+                        } else {
+                            const auto* input = reinterpret_cast<const int16_t*>(bytes);
+                            received.insert(received.end(), input,
+                                            input + static_cast<size_t>(frames) * 2);
                         }
                     }
-                } else {
-                    const auto* input = reinterpret_cast<const int16_t*>(bytes);
-                    received.insert(received.end(), input, input + static_cast<size_t>(frames) * 2);
+                    Check(reader->ReleaseBuffer(frames), "Release capture buffer");
+                    Check(reader->GetNextPacketSize(&packetFrames), "Get capture packet size");
                 }
             }
-            Check(reader->ReleaseBuffer(frames), "Release capture buffer");
-            Check(reader->GetNextPacketSize(&packetFrames), "Get capture packet size");
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     Check(render->Stop(), "Stop render");
     Check(capture->Stop(), "Stop capture");
 
     const size_t capturedFrames = received.size() / 2;
     std::cout << "sent_frames=" << sentFrames << " captured_frames=" << capturedFrames
-              << " silent_frames=" << silentFrames << '\n';
+              << " silent_frames=" << silentFrames
+              << " capture_packets=" << capturePackets
+              << " discontinuity_packets=" << discontinuityPackets
+              << " max_packet_frames=" << maximumPacketFrames << '\n';
     if (capturedFrames < kSampleRate * (routeCapture ? 1 : 2)) return 2;
 
     double strongest = 0.0;

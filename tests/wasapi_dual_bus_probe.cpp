@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include "src/dual_bus_signal.h"
+#include "src/wasapi_event_pump.h"
 
 #include <array>
 #include <chrono>
@@ -83,8 +84,11 @@ CaptureFormat InspectCaptureFormat(const WAVEFORMATEX* format) {
 class StreamPair {
 public:
     void Open(IMMDeviceEnumerator* enumerator, const wchar_t* renderId,
-              const wchar_t* captureId, unsigned bus) {
+              const wchar_t* captureId, unsigned bus,
+              HANDLE renderEvent, HANDLE captureEvent) {
         bus_ = bus;
+        renderEvent_ = renderEvent;
+        captureEvent_ = captureEvent;
         Check(enumerator->GetDevice(renderId, &renderDevice_), "Get render device");
         Check(enumerator->GetDevice(captureId, &captureDevice_), "Get capture device");
         Check(renderDevice_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
@@ -95,7 +99,8 @@ public:
               "Activate capture client");
 
         auto renderFormat = RenderFormat();
-        Check(render_->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 200000, 0,
+        Check(render_->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                  AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 0, 0,
                                   &renderFormat.Format, nullptr), "Initialize render");
         WAVEFORMATEX* mix = nullptr;
         Check(capture_->GetMixFormat(&mix), "Get capture mix format");
@@ -107,9 +112,12 @@ public:
             throw;
         }
         const HRESULT captureResult = capture_->Initialize(
-            AUDCLNT_SHAREMODE_SHARED, 0, 200000, 0, mix, nullptr);
+            AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+            0, 0, mix, nullptr);
         CoTaskMemFree(mix);
         Check(captureResult, "Initialize capture");
+        Check(render_->SetEventHandle(renderEvent_), "Set render event");
+        Check(capture_->SetEventHandle(captureEvent_), "Set capture event");
         Check(render_->GetService(IID_PPV_ARGS(&writer_)), "Get render service");
         Check(capture_->GetService(IID_PPV_ARGS(&reader_)), "Get capture service");
         Check(render_->GetBufferSize(&renderCapacity_), "Get render buffer size");
@@ -161,6 +169,20 @@ public:
         sentFrames_ += available;
     }
 
+    void PumpEvent(std::size_t eventIndex) {
+        if (eventIndex == renderEventIndex_) {
+            PumpRender();
+        } else if (eventIndex == captureEventIndex_) {
+            PumpCapture();
+        }
+    }
+
+    HANDLE renderEvent() const { return renderEvent_; }
+    HANDLE captureEvent() const { return captureEvent_; }
+
+    static constexpr std::size_t renderEventIndex_ = 0;
+    static constexpr std::size_t captureEventIndex_ = 1;
+
     void PumpCapture() {
         UINT32 packetFrames = 0;
         Check(reader_->GetNextPacketSize(&packetFrames), "Get capture packet size");
@@ -171,6 +193,9 @@ public:
             Check(reader_->GetBuffer(&bytes, &frames, &flags, nullptr, nullptr),
                   "Get capture buffer");
             const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
+            ++capturePackets_;
+            if (frames > maximumPacketFrames_) maximumPacketFrames_ = frames;
+            if (silent) ++silentPackets_;
             if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0 &&
                 warmupFrames_ == 0) {
                 ++discontinuities_;
@@ -217,6 +242,9 @@ public:
                       << " channel_leak_right=" << result.wrong_channel_power[1]
                       << " bus_leak_left=" << result.other_bus_power[0]
                       << " bus_leak_right=" << result.other_bus_power[1]
+                      << " peak=" << result.peak_absolute_sample
+                      << " clipped_samples=" << result.clipped_samples
+                      << " non_finite_samples=" << result.non_finite_samples
                       << " passed=" << static_cast<int>(result.passed()) << '\n';
             consumed_ += windowSamples;
         }
@@ -244,6 +272,9 @@ public:
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
+                  << " capture_packets=" << capturePackets_
+                  << " silent_packets=" << silentPackets_
+                  << " max_packet_frames=" << maximumPacketFrames_
                   << " discontinuities=" << discontinuities_
                   << " windows=" << windows_
                   << " failed_windows=" << failedWindows_ << '\n';
@@ -262,6 +293,9 @@ private:
     std::uint64_t sentFrames_ = 0;
     std::uint64_t capturedFrames_ = 0;
     std::uint64_t silentFrames_ = 0;
+    std::uint64_t capturePackets_ = 0;
+    std::uint64_t silentPackets_ = 0;
+    UINT32 maximumPacketFrames_ = 0;
     unsigned discontinuities_ = 0;
     std::size_t warmupFrames_ = 0;
     std::size_t consumed_ = 0;
@@ -270,6 +304,8 @@ private:
     bool renderStarted_ = false;
     bool captureStarted_ = false;
     Clock::time_point lastPacket_{};
+    HANDLE renderEvent_ = nullptr;
+    HANDLE captureEvent_ = nullptr;
     std::vector<float> samples_;
     std::vector<std::array<std::int16_t, 2>> toneTable_;
 };
@@ -288,18 +324,37 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
     ComPtr<IMMDeviceEnumerator> enumerator;
     Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                            IID_PPV_ARGS(&enumerator)), "Create endpoint enumerator");
+    sar_driver::WasapiEventPump eventPump;
     std::vector<StreamPair> streams(pairCount);
     for (unsigned index = 0; index < pairCount; ++index) {
+        const HANDLE renderEvent = eventPump.Create();
+        const HANDLE captureEvent = eventPump.Create();
+        if (renderEvent == nullptr || captureEvent == nullptr) {
+            throw std::runtime_error("Create WASAPI event failed");
+        }
         streams[index].Open(enumerator.Get(), ids[index * 2], ids[index * 2 + 1],
-                            firstBus + index);
+                            firstBus + index, renderEvent, captureEvent);
     }
     try {
         for (auto& stream : streams) stream.StartCapture();
         for (auto& stream : streams) stream.StartRender();
+        std::vector<std::size_t> readyEvents;
+        for (const auto& stream : streams) {
+            if (stream.renderEvent() == nullptr || stream.captureEvent() == nullptr) {
+                throw std::runtime_error("WASAPI event was not initialized");
+            }
+        }
         const auto start = Clock::now();
         while (Clock::now() - start < std::chrono::seconds(seconds)) {
-            for (auto& stream : streams) stream.PumpRender();
-            for (auto& stream : streams) stream.PumpCapture();
+            const DWORD wait = eventPump.Wait(50, readyEvents);
+            if (wait == WAIT_FAILED) {
+                const DWORD error = GetLastError();
+                throw std::runtime_error("Wait for audio events failed: " +
+                                         std::to_string(error));
+            }
+            for (const std::size_t eventIndex : readyEvents) {
+                streams[eventIndex / 2].PumpEvent(eventIndex % 2);
+            }
             for (auto& stream : streams) stream.AnalyzeReadyWindows();
             const auto now = Clock::now();
             for (auto& stream : streams) {
@@ -307,7 +362,6 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
                     throw std::runtime_error("Capture packet stalled for 250 ms");
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         for (auto& stream : streams) stream.Stop();
     } catch (...) {

@@ -2,7 +2,10 @@ param(
     [Parameter(Mandatory)] [string] $ProbePath,
     [Parameter(Mandatory)] [string] $RenderId,
     [Parameter(Mandatory)] [string] $CaptureId,
-    [ValidateSet('run', 'default', 'exclusive', 'route')] [string] $Mode = 'run',
+    [ValidateSet('run', 'default', 'exclusive', 'route', 'dual_bus')] [string] $Mode = 'run',
+    [string] $RenderId2,
+    [string] $CaptureId2,
+    [ValidateRange(5, 3600)] [int] $DurationSeconds = 15,
     [Parameter(Mandatory)] [string] $OutputPath
 )
 
@@ -10,7 +13,18 @@ $ErrorActionPreference = 'Stop'
 if (-not (Test-Path -LiteralPath $ProbePath -PathType Leaf)) {
     throw "Probe not found: $ProbePath"
 }
-foreach ($id in @($RenderId, $CaptureId)) {
+$ids = @($RenderId, $CaptureId)
+if ($Mode -eq 'dual_bus') {
+    if ([string]::IsNullOrWhiteSpace($RenderId2) -or
+        [string]::IsNullOrWhiteSpace($CaptureId2)) {
+        throw 'dual_bus mode requires RenderId2 and CaptureId2.'
+    }
+    $ids += @($RenderId2, $CaptureId2)
+} elseif (-not [string]::IsNullOrWhiteSpace($RenderId2) -or
+          -not [string]::IsNullOrWhiteSpace($CaptureId2)) {
+    throw 'RenderId2 and CaptureId2 are only valid in dual_bus mode.'
+}
+foreach ($id in $ids) {
     if ($id -notmatch '^\{0\.0\.[01]\.00000000\}\.\{[0-9a-fA-F-]{36}\}$') {
         throw "Invalid WASAPI endpoint ID: $id"
     }
@@ -23,18 +37,23 @@ if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue |
 $taskName = 'SARLab-InteractiveAudioProbe'
 $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
-$command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId' *> '$outputLiteral'; " +
+if ($Mode -eq 'dual_bus') {
+    $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds *> '$outputLiteral'; "
+} else {
+    $command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId' *> '$outputLiteral'; "
+}
+$command +=
            "'PROBE_EXIT=' + `$LASTEXITCODE | Add-Content -LiteralPath '$outputLiteral'"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -EncodedCommand $encoded"
 $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds ($DurationSeconds + 60))
 
 try {
     Remove-Item -LiteralPath $OutputPath -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
-    $deadline = (Get-Date).AddMinutes(2)
+    $deadline = (Get-Date).AddSeconds($DurationSeconds + 30)
     do {
         Start-Sleep -Milliseconds 500
         $task = Get-ScheduledTask -TaskName $taskName

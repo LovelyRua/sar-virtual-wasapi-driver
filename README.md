@@ -113,18 +113,31 @@ point-in-time snapshot; `wait-ready` polls for up to 120 seconds and returns
 success only after stable readiness.
 
 After installing the experimental driver in the dedicated lab, build the
-standalone user-mode probe with CMake and run it in an interactive audio
-session. A manual `Transport` workflow run also retains the x64 probe
+standalone user-mode probes with CMake and run them in an interactive audio
+session. They use WASAPI event-driven buffering, so service cadence follows
+the endpoint buffer-ready notifications instead of a fixed 2 ms polling loop.
+This improves continuity measurement but does not provide hard realtime
+scheduling or replace a long-duration soak test. A manual `Transport` workflow run also retains the x64 probe
 executable for three days, without changing driver signing or installation:
 
 ```bat
 cmake -S . -B build -A x64
 cmake --build build --config Release --target wasapi_bridge_probe
+cmake --build build --config Release --target wasapi_dual_bus_probe
 build\Release\wasapi_bridge_probe.exe --list
 build\Release\wasapi_bridge_probe.exe --run "<Speaker render ID>" "<MicArray1 capture ID>"
 build\Release\wasapi_bridge_probe.exe --default "<Speaker render ID>" "<MicArray1 capture ID>"
 build\Release\wasapi_bridge_probe.exe --route "<Speaker render ID>" "<downstream capture ID>"
 build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArray1 capture ID>"
+build\Release\wasapi_dual_bus_probe.exe "<Bus 0 render ID>" "<Bus 0 capture ID>" "<Bus 1 render ID>" "<Bus 1 capture ID>" 15
+```
+
+The dual-bus probe can also run inside the already logged-on desktop session
+through the interactive launcher. It reports packet cadence, discontinuities,
+silence, peak level, clipping, and non-finite sample counts for each bus:
+
+```powershell
+scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode dual_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -RenderId2 "<Bus 1 render ID>" -CaptureId2 "<Bus 1 capture ID>" -DurationSeconds 15 -OutputPath <report.txt>
 ```
 
 The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request

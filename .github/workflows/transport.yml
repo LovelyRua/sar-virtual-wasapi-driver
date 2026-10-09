@@ -19,6 +19,9 @@ jobs:
       - name: Endpoint inventory parser tests
         shell: pwsh
         run: ./scripts/lab-endpoint-inventory.tests.ps1
+      - name: Interactive probe argument tests
+        shell: pwsh
+        run: ./scripts/lab-interactive-probe.tests.ps1
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch'
         with:
