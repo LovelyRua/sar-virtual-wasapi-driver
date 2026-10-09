@@ -132,12 +132,13 @@ build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArr
 build\Release\wasapi_dual_bus_probe.exe "<Bus 0 render ID>" "<Bus 0 capture ID>" "<Bus 1 render ID>" "<Bus 1 capture ID>" 15
 ```
 
-The dual-bus probe can also run inside the already logged-on desktop session
+The multi-bus probe can also run inside the already logged-on desktop session
 through the interactive launcher. It reports packet cadence, discontinuities,
 silence, peak level, clipping, and non-finite sample counts for each bus:
 
 ```powershell
 scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode dual_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -RenderId2 "<Bus 1 render ID>" -CaptureId2 "<Bus 1 capture ID>" -DurationSeconds 15 -OutputPath <report.txt>
+scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode multi_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -AdditionalRenderIds @("<Bus 1 render ID>", "<Bus 2 render ID>", "<Bus 3 render ID>") -AdditionalCaptureIds @("<Bus 1 capture ID>", "<Bus 2 capture ID>", "<Bus 3 capture ID>") -DurationSeconds 15 -OutputPath <report.txt>
 ```
 
 The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request
@@ -345,14 +346,22 @@ boot mode remains active.
 
 ## Concurrent two-bus continuity probe (2026-10-08)
 
-`wasapi_dual_bus_probe` opens both render/capture pairs at once. It renders four
-distinct tones, checks one-second windows for channel order and cross-bus bleed,
-and records WASAPI capture discontinuity flags and packet stalls. It accepts
-four endpoint IDs followed by a duration of 5 to 3600 seconds. `--single 0`
-or `--single 1` runs either pair alone with the same analysis. The portable
-signal analyzer has synthetic tests for silence, swapped/duplicated channels,
-cross-bus bleed, attenuation, and invalid input. Windows CI builds the probe
-and runs those tests.
+`wasapi_dual_bus_probe` opens one to four render/capture pairs concurrently,
+matching the current two instances times two buses topology. It uses a unique
+stereo tone pair per bus, checks one-second windows for channel order and bleed
+from every other bus, and records WASAPI capture discontinuity flags and packet
+stalls. The legacy four-endpoint invocation still runs buses 0 and 1; `--single
+0` through `--single 3` isolates one bus. The new `--multi` form accepts two to
+four endpoint pairs, for example:
+
+```bat
+wasapi_dual_bus_probe.exe --multi 15 "<render 0>" "<capture 0>" "<render 1>" "<capture 1>" "<render 2>" "<capture 2>" "<render 3>" "<capture 3>"
+```
+
+The portable signal analyzer tests silence, swapped/duplicated channels,
+all-pairs bus isolation, four-bus leakage, attenuation, and invalid input. A
+separate options test covers legacy, single-bus, and multi-bus argument bounds.
+Windows CI builds the probe and runs both test executables.
 
 VM24's 15-second concurrent run passed: each bus produced 13 valid windows,
 with zero failed windows, zero silent frames, and zero discontinuities. Longer

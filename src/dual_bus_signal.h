@@ -9,10 +9,10 @@ namespace sar_driver {
 
 constexpr unsigned kProbeRate = 48000;
 constexpr std::size_t kProbeChannels = 2;
-constexpr std::size_t kProbeBuses = 2;
+constexpr std::size_t kProbeBuses = 4;
 constexpr double kProbePi = 3.14159265358979323846;
-constexpr std::array<std::array<unsigned, 2>, 2> kProbeFrequencies{{
-    {{997, 1501}}, {{2309, 3001}}
+constexpr std::array<std::array<unsigned, 2>, kProbeBuses> kProbeFrequencies{{
+    {{997, 1501}}, {{2309, 3001}}, {{4001, 5003}}, {{6007, 7001}}
 }};
 
 struct SignalWindow {
@@ -77,11 +77,14 @@ inline SignalWindow AnalyzeSignalWindow(const float* interleaved, std::size_t fr
             interleaved, frames, channel, kProbeFrequencies[bus][channel]);
         result.wrong_channel_power[channel] = TonePower(
             interleaved, frames, channel, kProbeFrequencies[bus][1 - channel]);
-        const unsigned other_bus = 1 - bus;
-        for (unsigned other_channel = 0; other_channel < kProbeChannels; ++other_channel) {
-            result.other_bus_power[channel] += TonePower(
-                interleaved, frames, channel,
-                kProbeFrequencies[other_bus][other_channel]);
+        for (unsigned other_bus = 0; other_bus < kProbeBuses; ++other_bus) {
+            if (other_bus == bus) continue;
+            for (unsigned other_channel = 0; other_channel < kProbeChannels;
+                 ++other_channel) {
+                result.other_bus_power[channel] += TonePower(
+                    interleaved, frames, channel,
+                    kProbeFrequencies[other_bus][other_channel]);
+            }
         }
     }
     result.enough_signal = result.expected_power[0] >= minimum_power &&

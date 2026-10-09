@@ -2,9 +2,11 @@ param(
     [Parameter(Mandatory)] [string] $ProbePath,
     [Parameter(Mandatory)] [string] $RenderId,
     [Parameter(Mandatory)] [string] $CaptureId,
-    [ValidateSet('run', 'default', 'exclusive', 'route', 'dual_bus')] [string] $Mode = 'run',
+    [ValidateSet('run', 'default', 'exclusive', 'route', 'dual_bus', 'multi_bus')] [string] $Mode = 'run',
     [string] $RenderId2,
     [string] $CaptureId2,
+    [string[]] $AdditionalRenderIds = @(),
+    [string[]] $AdditionalCaptureIds = @(),
     [ValidateRange(5, 3600)] [int] $DurationSeconds = 15,
     [Parameter(Mandatory)] [string] $OutputPath
 )
@@ -20,9 +22,26 @@ if ($Mode -eq 'dual_bus') {
         throw 'dual_bus mode requires RenderId2 and CaptureId2.'
     }
     $ids += @($RenderId2, $CaptureId2)
+    if ($AdditionalRenderIds.Count -ne 0 -or $AdditionalCaptureIds.Count -ne 0) {
+        throw 'Additional endpoint IDs are only valid in multi_bus mode.'
+    }
+} elseif ($Mode -eq 'multi_bus') {
+    if (-not [string]::IsNullOrWhiteSpace($RenderId2) -or
+        -not [string]::IsNullOrWhiteSpace($CaptureId2)) {
+        throw 'RenderId2 and CaptureId2 cannot be combined with multi_bus mode.'
+    }
+    if ($AdditionalRenderIds.Count -ne $AdditionalCaptureIds.Count -or
+        $AdditionalRenderIds.Count -lt 1 -or $AdditionalRenderIds.Count -gt 3) {
+        throw 'Multi-bus mode requires two to four endpoint pairs.'
+    }
+    for ($index = 0; $index -lt $AdditionalRenderIds.Count; $index++) {
+        $ids += @($AdditionalRenderIds[$index], $AdditionalCaptureIds[$index])
+    }
 } elseif (-not [string]::IsNullOrWhiteSpace($RenderId2) -or
           -not [string]::IsNullOrWhiteSpace($CaptureId2)) {
     throw 'RenderId2 and CaptureId2 are only valid in dual_bus mode.'
+} elseif ($AdditionalRenderIds.Count -ne 0 -or $AdditionalCaptureIds.Count -ne 0) {
+    throw 'Additional endpoint IDs are only valid in multi_bus mode.'
 }
 foreach ($id in $ids) {
     if ($id -notmatch '^\{0\.0\.[01]\.00000000\}\.\{[0-9a-fA-F-]{36}\}$') {
@@ -39,6 +58,9 @@ $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
 if ($Mode -eq 'dual_bus') {
     $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds *> '$outputLiteral'; "
+} elseif ($Mode -eq 'multi_bus') {
+    $quotedIds = @($ids | ForEach-Object { "'$_'" }) -join ' '
+    $command = "& '$probeLiteral' --multi $DurationSeconds $quotedIds *> '$outputLiteral'; "
 } else {
     $command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId' *> '$outputLiteral'; "
 }

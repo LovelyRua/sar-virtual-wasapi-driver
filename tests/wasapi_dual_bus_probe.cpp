@@ -8,7 +8,9 @@
 #include "src/dual_bus_signal.h"
 #include "src/wasapi_event_pump.h"
 #include "src/signal_window_queue.h"
+#include "src/wasapi_probe_options.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -388,17 +390,12 @@ private:
     std::vector<std::array<std::int16_t, 2>> toneTable_;
 };
 
-unsigned ParseSeconds(const wchar_t* text) {
-    wchar_t* end = nullptr;
-    const unsigned long value = std::wcstoul(text, &end, 10);
-    if (end == text || *end != L'\0' || value < 5 || value > 3600) {
-        throw std::runtime_error("Duration must be 5..3600 seconds");
-    }
-    return static_cast<unsigned>(value);
-}
-
 int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
         unsigned seconds) {
+    if (pairCount == 0 || pairCount > sar_driver::kMaximumProbeBuses ||
+        firstBus + pairCount > sar_driver::kProbeBuses) {
+        throw std::runtime_error("Invalid WASAPI probe bus range");
+    }
     ComPtr<IMMDeviceEnumerator> enumerator;
     Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                            IID_PPV_ARGS(&enumerator)), "Create endpoint enumerator");
@@ -456,7 +453,7 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
         continuityPassed = stream.ContinuityPassed(seconds) && continuityPassed;
     }
     const bool passed = contentPassed && continuityPassed;
-    std::cout << "dual_bus_probe passed=" << static_cast<int>(passed)
+    std::cout << "multi_bus_probe passed=" << static_cast<int>(passed)
               << " content_passed=" << static_cast<int>(contentPassed)
               << " continuity_passed=" << static_cast<int>(continuityPassed)
               << " active_buses=" << pairCount
@@ -467,12 +464,27 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 6) {
-        std::wcerr << L"Usage: wasapi_dual_bus_probe <render1> <capture1>"
-                      L" <render2> <capture2> <seconds> | --single <bus:0|1>"
-                      L" <render> <capture> <seconds>\n";
+    std::array<const wchar_t*, 11> arguments{};
+    if (argc > static_cast<int>(arguments.size())) {
+        std::wcerr << L"Probe accepts at most four endpoint pairs.\n";
         return 1;
     }
+    const int copied = std::min(argc, static_cast<int>(arguments.size()));
+    for (int index = 0; index < copied; ++index) arguments[index] = argv[index];
+    sar_driver::WasapiProbeOptions options;
+    std::wstring option_error;
+    if (!sar_driver::ParseWasapiProbeOptions(copied, arguments.data(),
+                                            options, option_error)) {
+        std::wcerr << L"Usage: wasapi_dual_bus_probe <render1> <capture1>"
+                      L" <render2> <capture2> <seconds>\n"
+                      L"   or: wasapi_dual_bus_probe --single <bus:0..3>"
+                      L" <render> <capture> <seconds>\n"
+                      L"   or: wasapi_dual_bus_probe --multi <seconds>"
+                      L" <render1> <capture1> ... <render4> <capture4>\n"
+                   << option_error << L'\n';
+        return 1;
+    }
+
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(initialized)) {
         std::cerr << "COM initialization failed\n";
@@ -480,18 +492,9 @@ int wmain(int argc, wchar_t** argv) {
     }
     int result = 1;
     try {
-        const unsigned seconds = ParseSeconds(argv[5]);
-        if (std::wstring(argv[1]) == L"--single") {
-            const std::wstring bus(argv[2]);
-            if (bus != L"0" && bus != L"1") {
-                throw std::runtime_error("Single-bus mode requires bus 0 or 1");
-            }
-            const std::array<const wchar_t*, 2> ids{{argv[3], argv[4]}};
-            result = Run(ids.data(), 1, bus == L"1" ? 1 : 0, seconds);
-        } else {
-            const std::array<const wchar_t*, 4> ids{{argv[1], argv[2], argv[3], argv[4]}};
-            result = Run(ids.data(), 2, 0, seconds);
-        }
+        result = Run(options.endpoint_ids.data(),
+                     static_cast<unsigned>(options.pair_count),
+                     options.first_bus, options.duration_seconds);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
     }

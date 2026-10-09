@@ -32,6 +32,19 @@ else()
 endif()
 add_test(NAME signal_window_queue_test COMMAND signal_window_queue_test)
 
+add_executable(wasapi_probe_options_test
+  tests/wasapi_probe_options_test.cpp
+  src/wasapi_probe_options.cpp
+)
+target_compile_features(wasapi_probe_options_test PRIVATE cxx_std_17)
+target_include_directories(wasapi_probe_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(wasapi_probe_options_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(wasapi_probe_options_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME wasapi_probe_options_test COMMAND wasapi_probe_options_test)
+
 if(WIN32)
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_sources(sar_device_instances PRIVATE
@@ -67,6 +80,7 @@ if(WIN32)
   endif()
 
   add_executable(wasapi_dual_bus_probe tests/wasapi_dual_bus_probe.cpp)
+  target_sources(wasapi_dual_bus_probe PRIVATE src/wasapi_probe_options.cpp)
   target_compile_features(wasapi_dual_bus_probe PRIVATE cxx_std_17)
   target_include_directories(wasapi_dual_bus_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(wasapi_dual_bus_probe PRIVATE ole32 uuid)

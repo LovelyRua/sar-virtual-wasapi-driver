@@ -32,7 +32,7 @@ std::vector<float> MakeWindow(unsigned bus) {
 }
 
 void TestPairedBuses() {
-    for (unsigned bus = 0; bus < 2; ++bus) {
+    for (unsigned bus = 0; bus < sar_driver::kProbeBuses; ++bus) {
         const auto samples = MakeWindow(bus);
         const auto result = AnalyzeSignalWindow(samples.data(), kProbeRate, bus);
         Expect(result.passed(), "paired bus must pass");
@@ -88,15 +88,22 @@ void TestSwappedAndDuplicatedChannels() {
 }
 
 void TestCrossBusAndAttenuation() {
-    const auto bus0 = MakeWindow(0);
-    const auto wrongBus = AnalyzeSignalWindow(bus0.data(), kProbeRate, 1);
-    Expect(!wrongBus.passed(), "cross-bus signal must fail");
-    Expect(!wrongBus.enough_signal, "cross-bus signal lacks target tones");
+    for (unsigned source = 0; source < sar_driver::kProbeBuses; ++source) {
+        const auto signal = MakeWindow(source);
+        for (unsigned target = 0; target < sar_driver::kProbeBuses; ++target) {
+            if (source == target) continue;
+            const auto wrongBus = AnalyzeSignalWindow(signal.data(), kProbeRate, target);
+            Expect(!wrongBus.passed(), "cross-bus signal must fail");
+            Expect(!wrongBus.enough_signal, "cross-bus signal lacks target tones");
+        }
+    }
 
     auto mixed = MakeWindow(0);
-    const auto bus1 = MakeWindow(1);
-    for (std::size_t index = 0; index < mixed.size(); ++index) {
-        mixed[index] += bus1[index] * 0.5f;
+    for (unsigned bus = 1; bus < sar_driver::kProbeBuses; ++bus) {
+        const auto other = MakeWindow(bus);
+        for (std::size_t index = 0; index < mixed.size(); ++index) {
+            mixed[index] += other[index] * 0.5f;
+        }
     }
     const auto leakage = AnalyzeSignalWindow(mixed.data(), kProbeRate, 0);
     Expect(!leakage.passed(), "strong bus bleed must fail");
@@ -114,13 +121,13 @@ void TestInvalidInput() {
            "null input must fail");
     Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate - 1, 0).passed(),
            "short window must fail");
-    Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 2).passed(),
+    Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 4).passed(),
            "unknown bus must fail");
     Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 0, 0.0).passed(),
            "invalid threshold must fail");
     Expect(!AnalyzeSignalWindow(samples.data(), kProbeRate, 0, 1e-5, 1.0).passed(),
            "invalid isolation ratio must fail");
-    Expect(ProbeFrame(2, 0) == std::array<std::int16_t, 2>{0, 0},
+    Expect(ProbeFrame(4, 0) == std::array<std::int16_t, 2>{0, 0},
            "invalid bus generator must be silent");
     Expect(ProbeFrame(0, 0, 2.0) == std::array<std::int16_t, 2>{0, 0},
            "invalid amplitude generator must be silent");
