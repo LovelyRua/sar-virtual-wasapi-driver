@@ -36,10 +36,16 @@ tone. Silence is a failure to route, not evidence of successful audio transfer.
 The TabletAudioSample adapter currently activates only the Speaker/MicArray1
 and SpeakerHeadphone/MicArray2 miniport pairs. Other upstream SysVAD miniport
 definitions and INF templates remain in the sample tree but are not activated
-by this adapter. The installed PnP device is labeled `System Audio Route
-Experimental`; its capture endpoints are `SAR Experimental Capture 1` and
-`SAR Experimental Capture 2`. These labels distinguish the lab buses from
-physical microphones and from a release-ready SAR driver.
+by this adapter. The installed PnP device uses the SAR-specific
+`Root\SystemAudioRoute\VirtualAudio` hardware ID and is labeled `System Audio
+Route Experimental`; its capture endpoints are `SAR Experimental Capture 1`
+and `SAR Experimental Capture 2`. The unique ID prevents the manager from
+claiming or removing a separate upstream SysVAD sample device. These labels
+distinguish the lab buses from physical microphones and from a release-ready SAR
+driver.
+The unique hardware ID is a source/package change and still requires a fresh
+VM24 install test; earlier lab records used the upstream sample ID. The manager
+will not claim or remove instances registered under that old ID.
 After installation on the lab VM, run the inventory check from the desktop or
 WinRM. Endpoint enumeration is valid in Session 0; audio transfer probes still
 require a logged-on desktop session:

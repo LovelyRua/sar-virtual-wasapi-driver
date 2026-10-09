@@ -70,6 +70,8 @@ if(WIN32)
     target_compile_options(device_instances_test PRIVATE /W4 /WX)
   endif()
   add_test(NAME device_instances_test COMMAND device_instances_test)
+  set_tests_properties(device_instances_test PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
   add_executable(wasapi_bridge_probe tests/wasapi_bridge_probe.cpp)
   target_compile_features(wasapi_bridge_probe PRIVATE cxx_std_17)

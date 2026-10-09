@@ -4,11 +4,39 @@
 
 #include <windows.h>
 
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
+namespace {
+
+bool test_sar_hardware_id_matches_both_infs() {
+    constexpr wchar_t expected[] = L"Root\\SystemAudioRoute\\VirtualAudio";
+    if (std::wstring(sar::devices::kHardwareId) != expected) return false;
+
+    const auto contains_hardware_id = [](const char* path) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) return false;
+        const std::string contents((std::istreambuf_iterator<char>(file)),
+                                   std::istreambuf_iterator<char>());
+        return contents.find("Root\\SystemAudioRoute\\VirtualAudio") !=
+                   std::string::npos &&
+               contents.find("Root\\sysvad_ComponentizedAudioSample") ==
+                   std::string::npos;
+    };
+    return contains_hardware_id(
+               "audio/sysvad/TabletAudioSample/ComponentizedAudioSample.inx") &&
+           contains_hardware_id(
+               "audio/sysvad/TabletAudioSample/ComponentizedAudioSampleExtension.inx");
+}
+
+} // namespace
+
 int wmain() {
+    if (!test_sar_hardware_id_matches_both_infs()) return 11;
+
     std::vector<sar::devices::Instance> instances;
     auto result = sar::devices::list(instances);
     if (!result.ok) {
