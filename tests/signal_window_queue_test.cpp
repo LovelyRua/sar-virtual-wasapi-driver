@@ -168,7 +168,7 @@ bool test_single_producer_consumer_publication() {
 }  // namespace
 
 int main() {
-    const bool (*tests[])() = {
+    bool (*tests[])() = {
         test_rejects_invalid_windows,
         test_preserves_fifo_order_and_samples,
         test_full_queue_drops_without_overwriting,
