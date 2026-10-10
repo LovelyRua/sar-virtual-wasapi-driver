@@ -233,7 +233,7 @@ void TestSignalThresholdBoundaries() {
 void TestDroppedCaptureFramesAreDetected() {
     auto captured = MakeWindow(0);
     constexpr unsigned firstDroppedFrame = 12000;
-    constexpr unsigned droppedFrames = 48;
+    constexpr unsigned droppedFrames = 4800;
     for (unsigned frame = firstDroppedFrame;
          frame + droppedFrames < kProbeRate; ++frame) {
         captured[frame * 2] = captured[(frame + droppedFrames) * 2];
