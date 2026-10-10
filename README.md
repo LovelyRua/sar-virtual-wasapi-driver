@@ -516,10 +516,10 @@ were unchanged. Detailed probe output remains under
 
 ## Capture service latency probe (2026-10-10)
 
-Commit `e07a23a` adds allocation-free per-packet capture service metrics to
-the WASAPI probe: event-service pass counts, empty passes, maximum packets
-drained per pass, packet timestamp age, and packets older than two device
-periods. The age threshold is diagnostic only; it does not change the strict
+Commits `e07a23a` and `eb99eed` add allocation-free per-packet capture service
+metrics to the WASAPI probe: event-service pass counts, empty passes, maximum
+packets drained per pass, packet timestamp age, and packets older than two
+device periods. The age threshold is diagnostic only; it does not change the strict
 zero-gap/zero-discontinuity continuity gate. The signal-analysis test also
 records its contract: a spectral content pass does not prove frame continuity.
 The Windows Transport workflow (including all CTest and probe-script tests)
