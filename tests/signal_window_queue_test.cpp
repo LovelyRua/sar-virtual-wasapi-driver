@@ -45,6 +45,14 @@ bool test_preserves_fifo_order_and_samples() {
         [](const float*, std::size_t) {});
 }
 
+bool test_empty_consume_does_not_invoke_consumer() {
+    Queue queue;
+    unsigned calls = 0;
+    const bool consumed = queue.try_consume_one(
+        [&](const float*, std::size_t) { ++calls; });
+    return !consumed && calls == 0 && queue.queued_windows() == 0;
+}
+
 bool test_full_queue_drops_without_overwriting() {
     Queue queue;
     std::array<float, kSamples> window{};
@@ -269,6 +277,7 @@ int main() {
     bool (*tests[])() = {
         test_rejects_invalid_windows,
         test_preserves_fifo_order_and_samples,
+        test_empty_consume_does_not_invoke_consumer,
         test_full_queue_drops_without_overwriting,
         test_drop_counter_tracks_every_rejected_window,
         test_invalid_push_does_not_corrupt_queued_window,
@@ -280,6 +289,7 @@ int main() {
     const char* names[] = {
         "invalid windows",
         "FIFO order and samples",
+        "empty queue does not call consumer",
         "full queue preserves existing data",
         "drop counter accounting",
         "invalid push preserves queued data",

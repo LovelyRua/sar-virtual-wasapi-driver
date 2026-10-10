@@ -135,6 +135,16 @@ bool test_multi_mode_rejects_cross_flow_duplicate_endpoint() {
     return !parse(args.data(), 7, options);
 }
 
+bool test_multi_mode_rejects_case_insensitive_duplicate_endpoint() {
+    const std::array<const wchar_t*, 7> args{{L"probe", L"--multi", L"10",
+                                             L"Render-A", L"capture-a",
+                                             L"render-a", L"capture-b"}};
+    sar_driver::WasapiProbeOptions options;
+    options.pair_count = 4;
+    return !parse(args.data(), 7, options) && options.pair_count == 0 &&
+           options.endpoint_ids[0] == nullptr;
+}
+
 bool test_single_mode_allows_independent_endpoint_pair() {
     const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"1", L"render-id", L"capture-id", L"5"}};
     sar_driver::WasapiProbeOptions options;
@@ -204,6 +214,7 @@ int main() {
                    test_multi_mode_rejects_reused_render_endpoint() &&
                    test_multi_mode_rejects_reused_capture_endpoint() &&
                    test_multi_mode_rejects_cross_flow_duplicate_endpoint() &&
+                   test_multi_mode_rejects_case_insensitive_duplicate_endpoint() &&
                    test_single_mode_allows_independent_endpoint_pair() &&
                    test_invalid_reused_endpoint_does_not_publish_partial_options() &&
                    test_failure_clears_previously_published_options() &&

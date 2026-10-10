@@ -48,6 +48,21 @@ int main() {
     CHECK(ring.Read(output, 4) == 4);
     for (size_t i = 0; i < 8; ++i) CHECK(output[i] == second[i]);
 
+    // Ring writes, including wraparound and over-capacity input, must stay
+    // inside caller-owned storage and retain the newest complete frames.
+    uint8_t guarded_storage[10];
+    for (size_t i = 0; i < sizeof(guarded_storage); ++i) guarded_storage[i] = 0xEE;
+    PcmFrameRing guarded_ring;
+    CHECK(guarded_ring.Initialize(guarded_storage + 1, 4, 2));
+    const uint8_t guarded_input[] = {51, 52, 53, 54, 55, 56, 57, 58,
+                                     59, 60, 61, 62};
+    written = guarded_ring.Write(guarded_input, 6);
+    CHECK(written.accepted_frames == 4 && written.dropped_frames == 2);
+    CHECK(guarded_storage[0] == 0xEE && guarded_storage[9] == 0xEE);
+    CHECK(guarded_ring.Read(output, 4) == 4);
+    for (size_t i = 0; i < 8; ++i) CHECK(output[i] == guarded_input[i + 4]);
+    CHECK(guarded_storage[0] == 0xEE && guarded_storage[9] == 0xEE);
+
     const uint8_t long_input[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
     written = ring.Write(long_input, 6);
     CHECK(written.accepted_frames == 4 && written.dropped_frames == 2);
