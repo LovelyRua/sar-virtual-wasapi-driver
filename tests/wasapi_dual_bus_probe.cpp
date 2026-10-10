@@ -9,6 +9,7 @@
 #include "src/wasapi_event_pump.h"
 #include "src/signal_window_queue.h"
 #include "src/wasapi_capture_timeline.h"
+#include "src/wasapi_capture_service_metrics.h"
 #include "src/wasapi_probe_options.h"
 
 #include <algorithm>
@@ -136,6 +137,17 @@ public:
         Check(render_->GetService(IID_PPV_ARGS(&writer_)), "Get render service");
         Check(capture_->GetService(IID_PPV_ARGS(&reader_)), "Get capture service");
         Check(render_->GetBufferSize(&renderCapacity_), "Get render buffer size");
+        REFERENCE_TIME defaultPeriod = 0;
+        REFERENCE_TIME minimumPeriod = 0;
+        Check(capture_->GetDevicePeriod(&defaultPeriod, &minimumPeriod),
+              "Get capture device period");
+        capture_period_100ns_ = static_cast<std::uint64_t>(
+            defaultPeriod > minimumPeriod ? defaultPeriod : minimumPeriod);
+        LARGE_INTEGER qpcFrequency{};
+        if (!QueryPerformanceFrequency(&qpcFrequency) || qpcFrequency.QuadPart <= 0) {
+            throw std::runtime_error("Query performance counter frequency failed");
+        }
+        qpc_frequency_ = static_cast<std::uint64_t>(qpcFrequency.QuadPart);
         toneTable_.reserve(sar_driver::kProbeRate);
         for (unsigned frame = 0; frame < sar_driver::kProbeRate; ++frame) {
             toneTable_.push_back(sar_driver::ProbeFrame(bus_, frame));
@@ -224,6 +236,7 @@ public:
     static constexpr std::size_t captureEventIndex_ = 1;
 
     void PumpCapture() {
+        service_metrics_.BeginPass();
         UINT32 packetFrames = 0;
         Check(reader_->GetNextPacketSize(&packetFrames), "Get capture packet size");
         while (packetFrames != 0) {
@@ -235,6 +248,19 @@ public:
             Check(reader_->GetBuffer(&bytes, &frames, &flags,
                                      &devicePosition, &qpcPosition),
                   "Get capture buffer");
+            LARGE_INTEGER servicedQpc{};
+            if (!QueryPerformanceCounter(&servicedQpc) || servicedQpc.QuadPart < 0) {
+                throw std::runtime_error("Query capture service timestamp failed");
+            }
+            const auto counter = static_cast<std::uint64_t>(servicedQpc.QuadPart);
+            const auto wholeSeconds = counter / qpc_frequency_;
+            const auto remainder = counter % qpc_frequency_;
+            const auto serviceQpc100ns = wholeSeconds *
+                sar_driver::WasapiCaptureTimeline::kQpcUnitsPerSecond +
+                remainder * sar_driver::WasapiCaptureTimeline::kQpcUnitsPerSecond /
+                    qpc_frequency_;
+            service_metrics_.ObservePacket(qpcPosition, serviceQpc100ns,
+                                           capture_period_100ns_);
             const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
             timeline_.Observe(devicePosition, qpcPosition, frames,
                               sar_driver::kProbeRate,
@@ -284,6 +310,7 @@ public:
             Check(reader_->ReleaseBuffer(frames), "Release capture buffer");
             Check(reader_->GetNextPacketSize(&packetFrames), "Get capture packet size");
         }
+        service_metrics_.EndPass();
     }
 
     void AnalyzeLoop() {
@@ -344,6 +371,9 @@ public:
 
     void Summary() const {
         const auto& timeline = timeline_.stats();
+        const auto& service = service_metrics_.stats();
+        const auto meanPacketAge = service.packets == 0 ? 0 :
+            service.total_timestamp_age_100ns / service.packets;
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
@@ -360,6 +390,14 @@ public:
                   << " qpc_regressions=" << timeline.qpc_regressions
                   << " max_qpc_delta_error_100ns="
                   << timeline.maximum_qpc_delta_error_100ns
+                  << " capture_service_passes=" << service.service_passes
+                  << " empty_capture_service_passes=" << service.empty_service_passes
+                  << " max_packets_per_service_pass=" << service.maximum_packets_per_pass
+                  << " mean_packet_age_100ns=" << meanPacketAge
+                  << " max_packet_age_100ns=" << service.maximum_timestamp_age_100ns
+                  << " packets_over_device_period=" << service.packets_over_period
+                  << " future_packet_timestamps="
+                  << service.packets_with_future_timestamp
                   << " windows=" << windows_
                   << " failed_windows=" << failed_windows_
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()
@@ -388,6 +426,9 @@ private:
     UINT32 maximumPacketFrames_ = 0;
     unsigned discontinuities_ = 0;
     sar_driver::WasapiCaptureTimeline timeline_;
+    sar_driver::WasapiCaptureServiceMetrics service_metrics_;
+    std::uint64_t capture_period_100ns_ = 0;
+    std::uint64_t qpc_frequency_ = 0;
     std::size_t warmupFrames_ = 0;
     std::array<float, AnalysisQueue::kSamplesPerWindow> pending_window_{};
     std::size_t pending_frames_ = 0;

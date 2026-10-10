@@ -172,6 +172,32 @@ bool test_full_queue_keeps_oldest_windows_and_rejects_newest() {
     return queue.queued_windows() == 0 && queue.dropped_windows() == 6;
 }
 
+bool test_partial_drain_retains_remaining_fifo_entries() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    for (unsigned id = 11; id <= 13; ++id) {
+        window.fill(static_cast<float>(id));
+        if (!queue.try_push(window.data(), window.size())) return false;
+    }
+    bool firstIntact = false;
+    if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+            firstIntact = count == kSamples && samples[0] == 11.0F &&
+                          samples[count - 1] == 11.0F;
+        }) || !firstIntact || queue.queued_windows() != 2) return false;
+    window.fill(14.0F);
+    if (!queue.try_push(window.data(), window.size()) || queue.queued_windows() != 3) {
+        return false;
+    }
+    for (unsigned expected = 12; expected <= 14; ++expected) {
+        bool intact = false;
+        if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+                intact = count == kSamples && samples[0] == expected &&
+                         samples[count - 1] == expected;
+            }) || !intact) return false;
+    }
+    return queue.queued_windows() == 0 && queue.dropped_windows() == 0;
+}
+
 bool test_single_producer_consumer_publication() {
     constexpr unsigned kWindowCount = 20000;
     Queue queue;
@@ -249,6 +275,7 @@ int main() {
         test_reuses_slots_after_consumer_releases_them,
         test_full_queue_keeps_oldest_windows_and_rejects_newest,
         test_multiple_queue_wraps_keep_window_edges_intact,
+        test_partial_drain_retains_remaining_fifo_entries,
         test_single_producer_consumer_publication};
     const char* names[] = {
         "invalid windows",
@@ -259,6 +286,7 @@ int main() {
         "slot reuse",
         "full queue preserves oldest windows",
         "repeated queue wraps preserve window edges",
+        "partial drain preserves FIFO entries",
         "SPSC publication stress"};
     for (std::size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); ++index) {
         if (!tests[index]()) {

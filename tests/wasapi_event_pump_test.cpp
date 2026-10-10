@@ -74,6 +74,17 @@ int main() {
     }
     if (four_bus_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 11;
 
+    // A busy pass must report every simultaneously signaled stream exactly once.
+    for (HANDLE event : four_bus_events) {
+        if (!SetEvent(event)) return 24;
+    }
+    if (four_bus_pump.Wait(0, ready) != WAIT_OBJECT_0 ||
+        ready.size() != four_bus_events.size()) return 25;
+    for (std::size_t index = 0; index < ready.size(); ++index) {
+        if (ready[index] != index) return 26;
+    }
+    if (four_bus_pump.Wait(0, ready) != WAIT_TIMEOUT || !ready.empty()) return 27;
+
     sar_driver::WasapiEventPump maximum_pump;
     for (DWORD index = 0; index < MAXIMUM_WAIT_OBJECTS; ++index) {
         if (maximum_pump.Create() == nullptr) return 12;

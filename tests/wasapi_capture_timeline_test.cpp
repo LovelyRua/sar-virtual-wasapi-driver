@@ -60,6 +60,26 @@ bool test_extreme_positions_saturate_without_wrapping() {
            timeline.stats().packets == 2;
 }
 
+bool test_timestamp_error_restarts_with_a_clean_reference_packet() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(0, 1000000, 480, 48000, false, false, false);
+    timeline.Observe(9000, 2000000, 480, 48000, false, false, true);
+    timeline.Observe(7000, 3000000, 480, 48000, false, false, false);
+    timeline.Observe(7480, 3100000, 480, 48000, false, false, false);
+    const auto& stats = timeline.stats();
+    return stats.timestamp_error_packets == 1 && stats.position_gap_packets == 0 &&
+           stats.position_overlap_packets == 0 && stats.qpc_regressions == 0 &&
+           stats.packets == 4;
+}
+
+bool test_qpc_delta_error_tracks_clock_drift_without_frame_gap() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(100, 1000000, 480, 48000, false, false, false);
+    timeline.Observe(580, 1110000, 480, 48000, false, false, false);
+    return timeline.stats().position_gap_packets == 0 &&
+           timeline.stats().maximum_qpc_delta_error_100ns == 10000;
+}
+
 }  // namespace
 
 int main() {
@@ -67,7 +87,9 @@ int main() {
                    test_gap_and_overlap_are_measured_in_frames() &&
                    test_timestamp_error_breaks_position_comparison_chain() &&
                    test_qpc_regression_and_zero_rate_do_not_overflow() &&
-                   test_extreme_positions_saturate_without_wrapping()
+                   test_extreme_positions_saturate_without_wrapping() &&
+                   test_timestamp_error_restarts_with_a_clean_reference_packet() &&
+                   test_qpc_delta_error_tracks_clock_drift_without_frame_gap()
                ? 0
                : 1;
 }

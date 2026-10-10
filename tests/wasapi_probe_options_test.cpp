@@ -107,6 +107,16 @@ bool test_multi_mode_rejects_one_or_five_pairs() {
     return !parse(one.data(), 5, options) && !parse(five.data(), 13, options);
 }
 
+bool test_multi_mode_rejects_missing_and_empty_endpoint_ids() {
+    const std::array<const wchar_t*, 7> missing{{L"probe", L"--multi", L"10",
+                                                 L"r0", L"c0", nullptr, L"c1"}};
+    const std::array<const wchar_t*, 7> empty{{L"probe", L"--multi", L"10",
+                                               L"r0", L"c0", L"", L"c1"}};
+    sar_driver::WasapiProbeOptions options;
+    return !parse(missing.data(), 7, options) && options.pair_count == 0 &&
+           !parse(empty.data(), 7, options) && options.pair_count == 0;
+}
+
 bool test_multi_mode_rejects_reused_render_endpoint() {
     const std::array<const wchar_t*, 7> args{{L"probe", L"--multi", L"10", L"same-render", L"c0", L"SAME-RENDER", L"c1"}};
     sar_driver::WasapiProbeOptions options;
@@ -190,6 +200,7 @@ int main() {
                    test_multi_mode_accepts_four_pairs() &&
                    test_multi_mode_rejects_odd_endpoint_count() &&
                    test_multi_mode_rejects_one_or_five_pairs() &&
+                   test_multi_mode_rejects_missing_and_empty_endpoint_ids() &&
                    test_multi_mode_rejects_reused_render_endpoint() &&
                    test_multi_mode_rejects_reused_capture_endpoint() &&
                    test_multi_mode_rejects_cross_flow_duplicate_endpoint() &&
