@@ -147,6 +147,11 @@ scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode d
 scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode multi_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -AdditionalRenderIds @("<Bus 1 render ID>", "<Bus 2 render ID>", "<Bus 3 render ID>") -AdditionalCaptureIds @("<Bus 1 capture ID>", "<Bus 2 capture ID>", "<Bus 3 capture ID>") -DurationSeconds 15 -OutputPath <report.txt>
 ```
 
+For a single isolated bus, use `-Mode single_bus -BusIndex 0` (indices 0..3).
+This launches the probe's `--single` mode in the logged-on desktop session and
+is useful for repeatable one-endpoint-pair controls without constructing a
+second virtual endpoint pair.
+
 The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request
 RAW capture; `--default` and `--route` use ordinary shared-mode capture without RAW.
 `--route` accepts a 48 kHz mono or stereo float32 downstream capture endpoint
@@ -543,3 +548,18 @@ continuity acceptance gate.
 The probe and control report are retained on VM24 under
 `C:\sar-lab\capture-service-metrics-eb99eed`; no driver, certificate,
 firewall, or VM security setting was changed for this measurement.
+
+The same `eb99eed` probe was rerun on 2026-10-10 against the same VB-Cable pair
+using the interactive launcher's new single-bus mode. All 13 analyzed windows
+passed signal/channel checks, with zero silent frames or packets, clipping, or
+non-finite samples. Strict continuity still failed: two WASAPI discontinuity
+flags and three device-position gap packets totaling 1,152 frames across 1,500
+capture packets; there were no timestamp errors or QPC regressions. The probe
+serviced 1,489 capture events (254 empty passes, up to three packets per pass).
+Mean/max packet age was 14.76/39.82 ms, with 313 packets older than two device
+periods. This repeat confirms the VB-Cable control can still show measurable
+continuity loss while signal content remains correct; differences from the
+2026-10-10 earlier sample are not a driver comparison or evidence of a stable
+rate. The report and launcher staging directory are under
+`C:\sar-lab\vb-control-singlebus-20261010` on VM24. No driver, certificate,
+endpoint, firewall, or boot-security setting was changed.

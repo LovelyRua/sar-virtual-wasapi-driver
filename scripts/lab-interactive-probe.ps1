@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)] [string] $ProbePath,
     [Parameter(Mandatory)] [string] $RenderId,
     [Parameter(Mandatory)] [string] $CaptureId,
-    [ValidateSet('run', 'default', 'exclusive', 'route', 'dual_bus', 'multi_bus')] [string] $Mode = 'run',
+    [ValidateSet('run', 'default', 'exclusive', 'route', 'single_bus', 'dual_bus', 'multi_bus')] [string] $Mode = 'run',
+    [ValidateRange(0, 3)] [int] $BusIndex = 0,
     [string] $RenderId2,
     [string] $CaptureId2,
     [string[]] $AdditionalRenderIds = @(),
@@ -16,7 +17,13 @@ if (-not (Test-Path -LiteralPath $ProbePath -PathType Leaf)) {
     throw "Probe not found: $ProbePath"
 }
 $ids = @($RenderId, $CaptureId)
-if ($Mode -eq 'dual_bus') {
+if ($Mode -eq 'single_bus') {
+    if (-not [string]::IsNullOrWhiteSpace($RenderId2) -or
+        -not [string]::IsNullOrWhiteSpace($CaptureId2) -or
+        $AdditionalRenderIds.Count -ne 0 -or $AdditionalCaptureIds.Count -ne 0) {
+        throw 'single_bus mode accepts exactly one endpoint pair.'
+    }
+} elseif ($Mode -eq 'dual_bus') {
     if ([string]::IsNullOrWhiteSpace($RenderId2) -or
         [string]::IsNullOrWhiteSpace($CaptureId2)) {
         throw 'dual_bus mode requires RenderId2 and CaptureId2.'
@@ -56,7 +63,9 @@ if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue |
 $taskName = 'SARLab-InteractiveAudioProbe'
 $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
-if ($Mode -eq 'dual_bus') {
+if ($Mode -eq 'single_bus') {
+    $command = "& '$probeLiteral' --single $BusIndex '$RenderId' '$CaptureId' $DurationSeconds *> '$outputLiteral'; "
+} elseif ($Mode -eq 'dual_bus') {
     $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds *> '$outputLiteral'; "
 } elseif ($Mode -eq 'multi_bus') {
     $quotedIds = @($ids | ForEach-Object { "'$_'" }) -join ' '

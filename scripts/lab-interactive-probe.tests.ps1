@@ -112,7 +112,34 @@ try {
         throw "Four-bus launcher generated an unexpected command: $command"
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=9'
+    $single = $base.Clone()
+    $single.Mode = 'single_bus'
+    $single.BusIndex = 2
+    & $scriptPath @single | Out-Null
+    $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+    $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+    $expectedSingleArguments = "--single 2 '$validRender' '$validCapture' 15"
+    if (-not $command.Contains($expectedSingleArguments)) {
+        throw "Single-bus launcher generated an unexpected command: $command"
+    }
+
+    $singleWithExtraPair = $base.Clone()
+    $singleWithExtraPair.Mode = 'single_bus'
+    $singleWithExtraPair.RenderId2 = $validRender2
+    $singleWithExtraPair.CaptureId2 = $validCapture2
+    Assert-Rejected $singleWithExtraPair 'single_bus mode accepts exactly one endpoint pair.'
+
+    $singleWithOutOfRangeBus = $base.Clone()
+    $singleWithOutOfRangeBus.Mode = 'single_bus'
+    $singleWithOutOfRangeBus.BusIndex = 4
+    try {
+        & $scriptPath @singleWithOutOfRangeBus | Out-Null
+        throw 'Expected BusIndex validation failure.'
+    } catch {
+        if ($_.Exception.Message -notmatch 'BusIndex') { throw }
+    }
+
+    Write-Output 'lab_interactive_probe_tests passed=12'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
