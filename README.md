@@ -513,3 +513,33 @@ retained; certificate residual count was zero, all firewall profiles remained
 enabled, and the previously authorized test-signing/Secure-Boot lab settings
 were unchanged. Detailed probe output remains under
 `C:\sar-lab\continuity-33645c7` on VM24.
+
+## Capture service latency probe (2026-10-10)
+
+Commit `e07a23a` adds allocation-free per-packet capture service metrics to
+the WASAPI probe: event-service pass counts, empty passes, maximum packets
+drained per pass, packet timestamp age, and packets older than two device
+periods. The age threshold is diagnostic only; it does not change the strict
+zero-gap/zero-discontinuity continuity gate. The signal-analysis test also
+records its contract: a spectral content pass does not prove frame continuity.
+The Windows Transport workflow (including all CTest and probe-script tests)
+and pinned SysVAD build both pass at `eb99eed`.
+
+VM24 was sampled as a VB-Cable-only control because no SAR instance was
+installed during this probe run. The guest had 2 vCPUs, 4 GB RAM, about 1.9 GB
+free, AudioSrv running, and 0-3% aggregate CPU during the short baseline sample.
+In a 15-second interactive control, all 14 analyzed signal windows passed,
+with zero silence, timestamp errors, or QPC regressions. Continuity still
+failed: 1,504 capture packets contained five device-position gaps (2,400
+frames) and three discontinuity flags; the metrics therefore count these as
+separate signals. The probe serviced 1,492 capture-event passes, including 220
+empty passes, with up to three packets drained in one pass. Mean packet age was
+13.49 ms, maximum age 47.91 ms, and 279 packets exceeded the two-period
+diagnostic threshold. This establishes that the lab control itself can show
+packet gaps despite correct signal content, but does not compare the current
+SAR driver revision or attribute the gaps to either driver. Keep the strict
+continuity acceptance gate.
+
+The probe and control report are retained on VM24 under
+`C:\sar-lab\capture-service-metrics-eb99eed`; no driver, certificate,
+firewall, or VM security setting was changed for this measurement.
