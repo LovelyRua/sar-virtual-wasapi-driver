@@ -16,7 +16,8 @@ int main() {
         stats.empty_service_passes != 1 || stats.maximum_packets_per_pass != 2 ||
         stats.total_timestamp_age_100ns != 2000 ||
         stats.maximum_timestamp_age_100ns != 1500 ||
-        stats.packets_over_period != 1) return 1;
+        stats.packets_over_late_threshold != 1 ||
+        stats.packets_with_valid_timestamp != 2) return 1;
 
     metrics.BeginPass();
     metrics.ObservePacket(5000, 4000, 1000);
@@ -30,6 +31,7 @@ int main() {
     metrics.EndPass();
     if (metrics.stats().total_timestamp_age_100ns !=
             std::numeric_limits<std::uint64_t>::max() ||
-        metrics.stats().packets_over_period != 1) return 3;
+        metrics.stats().packets_over_late_threshold != 1 ||
+        metrics.stats().packets_with_valid_timestamp != 4) return 3;
     return 0;
 }

@@ -8,9 +8,10 @@ namespace sar_driver {
 struct CaptureServiceStats {
     std::uint64_t service_passes = 0;
     std::uint64_t packets = 0;
+    std::uint64_t packets_with_valid_timestamp = 0;
     std::uint64_t empty_service_passes = 0;
     std::uint64_t packets_with_future_timestamp = 0;
-    std::uint64_t packets_over_period = 0;
+    std::uint64_t packets_over_late_threshold = 0;
     std::uint64_t total_timestamp_age_100ns = 0;
     std::uint64_t maximum_timestamp_age_100ns = 0;
     std::uint32_t maximum_packets_per_pass = 0;
@@ -35,12 +36,13 @@ public:
             return;
         }
         const std::uint64_t age = serviced_qpc_100ns - packet_qpc_100ns;
+        ++stats_.packets_with_valid_timestamp;
         AddSaturated(stats_.total_timestamp_age_100ns, age);
         if (age > stats_.maximum_timestamp_age_100ns) {
             stats_.maximum_timestamp_age_100ns = age;
         }
         if (period_100ns != 0 && age > period_100ns) {
-            ++stats_.packets_over_period;
+            ++stats_.packets_over_late_threshold;
         }
     }
 

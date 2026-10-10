@@ -259,8 +259,12 @@ public:
                 sar_driver::WasapiCaptureTimeline::kQpcUnitsPerSecond +
                 remainder * sar_driver::WasapiCaptureTimeline::kQpcUnitsPerSecond /
                     qpc_frequency_;
+            const auto lateThreshold = capture_period_100ns_ >
+                    std::numeric_limits<std::uint64_t>::max() / 2
+                ? std::numeric_limits<std::uint64_t>::max()
+                : capture_period_100ns_ * 2;
             service_metrics_.ObservePacket(qpcPosition, serviceQpc100ns,
-                                           capture_period_100ns_);
+                                           lateThreshold);
             const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
             timeline_.Observe(devicePosition, qpcPosition, frames,
                               sar_driver::kProbeRate,
@@ -372,8 +376,8 @@ public:
     void Summary() const {
         const auto& timeline = timeline_.stats();
         const auto& service = service_metrics_.stats();
-        const auto meanPacketAge = service.packets == 0 ? 0 :
-            service.total_timestamp_age_100ns / service.packets;
+        const auto meanPacketAge = service.packets_with_valid_timestamp == 0 ? 0 :
+            service.total_timestamp_age_100ns / service.packets_with_valid_timestamp;
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
@@ -395,7 +399,8 @@ public:
                   << " max_packets_per_service_pass=" << service.maximum_packets_per_pass
                   << " mean_packet_age_100ns=" << meanPacketAge
                   << " max_packet_age_100ns=" << service.maximum_timestamp_age_100ns
-                  << " packets_over_device_period=" << service.packets_over_period
+                  << " packets_over_2_device_periods="
+                  << service.packets_over_late_threshold
                   << " future_packet_timestamps="
                   << service.packets_with_future_timestamp
                   << " windows=" << windows_
