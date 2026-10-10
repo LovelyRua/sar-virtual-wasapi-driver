@@ -123,6 +123,18 @@ try {
         throw "Single-bus launcher generated an unexpected command: $command"
     }
 
+    foreach ($boundaryBus in 0, 3) {
+        $boundary = $base.Clone()
+        $boundary.Mode = 'single_bus'
+        $boundary.BusIndex = $boundaryBus
+        & $scriptPath @boundary | Out-Null
+        $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+        $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+        if (-not $command.Contains("--single $boundaryBus '$validRender' '$validCapture' 15")) {
+            throw "Single-bus boundary index $boundaryBus generated an unexpected command: $command"
+        }
+    }
+
     $singleWithExtraPair = $base.Clone()
     $singleWithExtraPair.Mode = 'single_bus'
     $singleWithExtraPair.RenderId2 = $validRender2
@@ -139,7 +151,7 @@ try {
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=12'
+    Write-Output 'lab_interactive_probe_tests passed=14'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

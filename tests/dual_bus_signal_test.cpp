@@ -49,6 +49,17 @@ void TestPairedBuses() {
     }
 }
 
+void TestDcOffsetPreservesToneClassification() {
+    auto samples = MakeWindow(1);
+    for (float& sample : samples) sample += 0.1f;
+    const auto result = AnalyzeSignalWindow(samples.data(), kProbeRate, 1);
+    Expect(result.passed(), "moderate DC offset must not hide valid bus tones");
+    Expect(result.channel_order_ok && result.bus_isolation_ok,
+           "DC offset must not alter channel or bus classification");
+    Expect(result.sample_integrity_ok && result.peak_absolute_sample < 0.999,
+           "in-range DC offset must not be treated as clipping");
+}
+
 void TestProbeToneIsIndependentOfPacketBoundaries() {
     constexpr std::array<unsigned, 5> packetSizes{{1, 127, 480, 1024, 4096}};
     for (unsigned bus = 0; bus < sar_driver::kProbeBuses; ++bus) {
@@ -248,6 +259,7 @@ void TestSpectralAnalysisDoesNotProveTimelineContinuity() {
 
 int main() {
     TestPairedBuses();
+    TestDcOffsetPreservesToneClassification();
     TestProbeToneIsIndependentOfPacketBoundaries();
     TestSilenceAndMissingChannel();
     TestSwappedAndDuplicatedChannels();

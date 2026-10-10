@@ -8,6 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Do not leave a previous successful report behind when this run fails to parse.
+if ($ReportPath) { Remove-Item -LiteralPath $ReportPath -Force -ErrorAction SilentlyContinue }
+
 if ([bool]$ProbePath -eq [bool]$InventoryPath) {
     throw 'Specify exactly one of ProbePath or InventoryPath.'
 }

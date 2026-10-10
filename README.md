@@ -563,3 +563,33 @@ continuity loss while signal content remains correct; differences from the
 rate. The report and launcher staging directory are under
 `C:\sar-lab\vb-control-singlebus-20261010` on VM24. No driver, certificate,
 endpoint, firewall, or boot-security setting was changed.
+
+## Concurrent VB-Cable and SAR bus control (2026-10-10)
+
+To compare the VM baseline under identical load, the `eb99eed` probe opened the
+VB-Cable pair and the CI-built experimental Speaker/Capture 1 pair
+simultaneously in the same interactive 30-second run. All 28 one-second signal
+and channel/isolation windows passed on both buses, with zero silent frames or
+packets, clipping, non-finite samples, timestamp errors, or QPC regressions.
+Strict continuity failed equally at the discontinuity-counter level: each bus
+reported 23 flags. Device-position tracking found 18 gaps / 39,072 frames on
+VB-Cable and 16 gaps / 37,344 frames on the SAR sample bridge. VB-Cable sent
+1,403,232 and captured 1,402,848 frames; SAR sent 1,401,408 and captured
+1,404,096 frames. The event-service metrics also show late scheduling on both:
+mean packet age was 15.80 ms (maximum 313.81 ms) for VB-Cable and 16.66 ms
+(maximum 311.41 ms) for SAR. SAR target-tone power varied markedly in several
+windows despite staying above the current pass floor; signal pass is not a
+no-dropout or level-stability claim.
+
+This paired run strengthens the evidence that VM/audio scheduling contributes
+materially to the observed continuity failures; it does not establish that the
+driver is clean, because both strict gates failed and this is only one short
+sample. The current analyzer does not enforce a tight per-window level-variance
+limit, so the reduced SAR target power remains an open diagnostic. The exact
+probe report and package are retained under
+`C:\sar-lab\ab-vb-sar-7e9de3e` on VM24. Afterward, only the new
+`ROOT\MEDIA\0001`, `oem12.inf`, and temporary signing identity were removed.
+Checks confirmed the VB-Cable-only Media inventory was restored, no matching
+temporary certificate remained in LocalMachine My/Root/TrustedPublisher,
+firewall profiles remained enabled, and the previously authorized lab boot
+mode (Secure Boot off, test signing on) was unchanged.

@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $checker = Join-Path $PSScriptRoot 'lab-endpoint-inventory.ps1'
 $shell = (Get-Process -Id $PID).Path
 $inventory = Join-Path ([IO.Path]::GetTempPath()) "sar-endpoints-$([guid]::NewGuid().ToString('N')).txt"
+$reportPath = Join-Path ([IO.Path]::GetTempPath()) "sar-endpoints-report-$([guid]::NewGuid().ToString('N')).json"
 $pair = @'
 Render endpoints:
   Speakers (System Audio Route Experimental)
@@ -29,7 +30,7 @@ try {
         @{ Name = 'duplicate-id'; Text = $pair -replace '66666666-6666-6666-6666-666666666666', '33333333-3333-3333-3333-333333333333'; Passed = $false; Count = 4 }
     )) {
         Set-Content -LiteralPath $inventory -Value $case.Text -Encoding UTF8
-        $output = & $shell -NoProfile -File $checker -InventoryPath $inventory
+        $output = & $shell -NoProfile -File $checker -InventoryPath $inventory -ReportPath $reportPath
         $exit = $LASTEXITCODE
         $report = ($output -join "`n") | ConvertFrom-Json
         if ($report.Passed -ne $case.Passed -or
@@ -37,9 +38,19 @@ try {
             $exit -ne [int](!$case.Passed)) {
             throw "Inventory case '$($case.Name)' failed: exit=$exit report=$($output -join ' ')"
         }
+        if ((Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json).Passed -ne $case.Passed) {
+            throw "Inventory case '$($case.Name)' wrote a report that disagrees with stdout."
+        }
     }
-    Write-Output 'lab_endpoint_inventory_tests passed=4'
+    Set-Content -LiteralPath $reportPath -Value '{"Passed":true}' -Encoding UTF8
+    Set-Content -LiteralPath $inventory -Value "Render endpoints:`n  Broken endpoint`nCapture endpoints:" -Encoding UTF8
+    $failedOutput = & $shell -NoProfile -File $checker -InventoryPath $inventory -ReportPath $reportPath 2>&1
+    if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $reportPath)) {
+        throw "Malformed inventory left a stale report or succeeded: $failedOutput"
+    }
+    Write-Output 'lab_endpoint_inventory_tests passed=5'
 } finally {
     Remove-Item -LiteralPath $inventory -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $reportPath -ErrorAction SilentlyContinue
 }
 exit 0

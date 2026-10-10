@@ -54,6 +54,16 @@ int main() {
         }
     }
 
+    // A failed kernel wait must not leak stale readiness from a previous pass.
+    sar_driver::WasapiEventPump invalid_handle_pump;
+    const HANDLE invalidated = invalid_handle_pump.Create();
+    if (invalidated == nullptr || !invalid_handle_pump.Prepare(ready)) return 28;
+    if (!CloseHandle(invalidated)) return 29;
+    ready.push_back(99);
+    SetLastError(ERROR_SUCCESS);
+    if (invalid_handle_pump.Wait(0, ready) != WAIT_FAILED || !ready.empty() ||
+        GetLastError() != ERROR_INVALID_HANDLE) return 30;
+
     // All signaled clients must be drained in a single service pass in stable order.
     sar_driver::WasapiEventPump four_bus_pump;
     std::vector<HANDLE> four_bus_events;
