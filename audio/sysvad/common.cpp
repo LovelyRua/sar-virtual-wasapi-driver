@@ -20,6 +20,7 @@ Abstract:
 #include "savedata.h"
 #include "IHVPrivatePropertySet.h"
 #include "simple.h"
+#include "../../src/pcm_frame_ring.h"
 
 #ifdef SYSVAD_BTH_BYPASS
 #include <limits.h>
@@ -50,7 +51,47 @@ Abstract:
 // CSaveData statics
 //-----------------------------------------------------------------------------
 
-PDEVICE_OBJECT          CSaveData::m_pDeviceObject = NULL;
+class CBridgeSpinLockGuard
+{
+public:
+    explicit CBridgeSpinLockGuard(_Inout_ PKSPIN_LOCK Lock)
+        : m_Lock(Lock),
+          m_AtDispatchLevel(KeGetCurrentIrql() >= DISPATCH_LEVEL),
+          m_OldIrql(PASSIVE_LEVEL)
+    {
+        // UpdatePosition is called from both DPC and position-query paths.
+        NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+        if (m_AtDispatchLevel)
+        {
+            KeAcquireSpinLockAtDpcLevel(m_Lock);
+        }
+        else
+        {
+            KeAcquireSpinLock(m_Lock, &m_OldIrql);
+        }
+    }
+
+    ~CBridgeSpinLockGuard()
+    {
+        if (m_AtDispatchLevel)
+        {
+            KeReleaseSpinLockFromDpcLevel(m_Lock);
+        }
+        else
+        {
+            KeReleaseSpinLock(m_Lock, m_OldIrql);
+        }
+    }
+
+    CBridgeSpinLockGuard(const CBridgeSpinLockGuard&) = delete;
+    CBridgeSpinLockGuard& operator=(const CBridgeSpinLockGuard&) = delete;
+
+private:
+    PKSPIN_LOCK m_Lock;
+    BOOLEAN m_AtDispatchLevel;
+    KIRQL m_OldIrql;
+};
+
 //=============================================================================
 // Classes
 //=============================================================================
@@ -83,6 +124,14 @@ class CAdapterCommon :
 
         PCSYSVADHW              m_pHW;                  // Virtual SYSVAD HW object
         PPORTCLSETWHELPER       m_pPortClsEtwHelper;
+
+        KSPIN_LOCK              m_BridgeLock[2];
+        BYTE                    m_BridgeStorage[2][4096 * 4];
+        sar_driver::PcmFrameRing m_BridgeRing[2];
+        ULONGLONG               m_BridgeInvalidWriteBytes[2];
+        ULONGLONG               m_BridgeInvalidReadBytes[2];
+        ULONGLONG               m_BridgeWriteCalls[2];
+        ULONGLONG               m_BridgeReadCalls[2];
 
         static LONG             m_AdapterInstances;     // # of adapter objects.
 
@@ -122,6 +171,15 @@ class CAdapterCommon :
         STDMETHODIMP_(PDEVICE_OBJECT)   GetPhysicalDeviceObject(void);
         
         STDMETHODIMP_(WDFDEVICE)        GetWdfDevice(void);
+
+        STDMETHODIMP_(VOID) BridgeWrite(_In_ ULONG Bus,
+                                       _In_reads_bytes_(Bytes) const BYTE* Data,
+                                       _In_ ULONG Bytes);
+        STDMETHODIMP_(VOID) BridgeRead(_In_ ULONG Bus,
+                                      _Out_writes_bytes_(Bytes) BYTE* Data,
+                                      _In_ ULONG Bytes);
+        STDMETHODIMP_(VOID) BridgeReset(_In_ ULONG Bus);
+        STDMETHODIMP_(VOID) BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats);
 
         STDMETHODIMP_(void)     SetWaveServiceGroup
         (   
@@ -581,15 +639,9 @@ Return Value:
     NTSTATUS ntStatus;
 
     //
-    // This sample supports only one instance of this object.
-    // (b/c of CSaveData's static members and Bluetooth HFP logic). 
-    //
-    if (InterlockedCompareExchange(&CAdapterCommon::m_AdapterInstances, 1, 0) != 0)
-    {
-        ntStatus = STATUS_DEVICE_BUSY;
-        DPF(D_ERROR, ("NewAdapterCommon failed, only one instance is allowed"));
-        goto Done;
-    }
+    // Count live adapter objects for diagnostics. Device state is owned by
+    // each adapter; do not reject a second PnP instance here.
+    InterlockedIncrement(&CAdapterCommon::m_AdapterInstances);
     
     //
     // Allocate an adapter object.
@@ -597,6 +649,7 @@ Return Value:
     CAdapterCommon *p = new(PoolFlags, MINADAPTER_POOLTAG) CAdapterCommon(UnknownOuter);
     if (p == NULL)
     {
+        InterlockedDecrement(&CAdapterCommon::m_AdapterInstances);
         ntStatus = STATUS_INSUFFICIENT_RESOURCES;
         DPF(D_ERROR, ("NewAdapterCommon failed, 0x%x", ntStatus));
         goto Done;
@@ -651,7 +704,7 @@ Return Value:
     }
 
     InterlockedDecrement(&CAdapterCommon::m_AdapterInstances);
-    ASSERT(CAdapterCommon::m_AdapterInstances == 0);
+    ASSERT(CAdapterCommon::m_AdapterInstances >= 0);
 #ifdef SYSVAD_USB_SIDEBAND
     ASSERT(IsListEmpty(&m_PowerRelations));
 #endif // SYSVAD_USB_SIDEBAND
@@ -738,6 +791,78 @@ Return Value:
 } // GetWdfDevice
 
 //=============================================================================
+#pragma code_seg()
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeWrite(_In_ ULONG Bus, _In_reads_bytes_(Bytes) const BYTE* Data, _In_ ULONG Bytes)
+{
+    if (Bus >= 2) return;
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
+    if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0)
+    {
+        m_BridgeInvalidWriteBytes[Bus] += Bytes;
+    }
+    else
+    {
+        ++m_BridgeWriteCalls[Bus];
+        m_BridgeRing[Bus].Write(Data, Bytes / 4);
+    }
+}
+
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeRead(_In_ ULONG Bus, _Out_writes_bytes_(Bytes) BYTE* Data, _In_ ULONG Bytes)
+{
+    if (Bus >= 2)
+    {
+        if (Data != NULL && Bytes != 0) RtlZeroMemory(Data, Bytes);
+        return;
+    }
+    if (Data != NULL && Bytes != 0 && (Bytes % 4) != 0)
+    {
+        RtlZeroMemory(Data, Bytes);
+    }
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
+    if (Data == NULL || Bytes == 0 || (Bytes % 4) != 0)
+    {
+        m_BridgeInvalidReadBytes[Bus] += Bytes;
+    }
+    else
+    {
+        ++m_BridgeReadCalls[Bus];
+        m_BridgeRing[Bus].Read(Data, Bytes / 4);
+    }
+}
+
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeReset(_In_ ULONG Bus)
+{
+    if (Bus >= 2) return;
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
+    m_BridgeRing[Bus].Reset();
+    m_BridgeInvalidWriteBytes[Bus] = 0;
+    m_BridgeInvalidReadBytes[Bus] = 0;
+    m_BridgeWriteCalls[Bus] = 0;
+    m_BridgeReadCalls[Bus] = 0;
+}
+
+STDMETHODIMP_(VOID)
+CAdapterCommon::BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats)
+{
+    if (Stats == NULL) return;
+    RtlZeroMemory(Stats, sizeof(*Stats));
+    if (Bus >= 2) return;
+
+    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
+    Stats->QueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].queued_frames());
+    Stats->PeakQueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].peak_queued_frames());
+    Stats->DroppedFrames = m_BridgeRing[Bus].dropped_frames();
+    Stats->SilentFrames = m_BridgeRing[Bus].silent_frames();
+    Stats->InvalidWriteBytes = m_BridgeInvalidWriteBytes[Bus];
+    Stats->InvalidReadBytes = m_BridgeInvalidReadBytes[Bus];
+    Stats->WriteCalls = m_BridgeWriteCalls[Bus];
+    Stats->ReadCalls = m_BridgeReadCalls[Bus];
+}
+
+//=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS
 CAdapterCommon::Init
@@ -788,6 +913,18 @@ Return Value:
     m_PowerState            = PowerDeviceD0;
     m_pHW                   = NULL;
     m_pPortClsEtwHelper     = NULL;
+    for (ULONG bus = 0; bus < 2; ++bus)
+    {
+        m_BridgeInvalidWriteBytes[bus] = 0;
+        m_BridgeInvalidReadBytes[bus] = 0;
+        m_BridgeWriteCalls[bus] = 0;
+        m_BridgeReadCalls[bus] = 0;
+        KeInitializeSpinLock(&m_BridgeLock[bus]);
+        if (!m_BridgeRing[bus].Initialize(m_BridgeStorage[bus], 4096, 4))
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+    }
 
     InitializeListHead(&m_SubdeviceCache);
 
@@ -834,10 +971,6 @@ Return Value:
     
     m_pHW->MixerReset();
 
-    //
-    // Initialize SaveData class.
-    //
-    CSaveData::SetDeviceObject(DeviceObject);   //device object is needed by CSaveData
 Done:
 
     return ntStatus;

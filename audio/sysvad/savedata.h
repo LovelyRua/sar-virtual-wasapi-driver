@@ -95,9 +95,9 @@ protected:
     OUTPUT_DATA_HEADER          m_DataHeader;
     PLARGE_INTEGER              m_pFilePtr;
 
-    static PDEVICE_OBJECT       m_pDeviceObject;
-    static ULONG                m_ulStreamId;
-    static ULONG                m_ulOffloadStreamId;
+    PDEVICE_OBJECT              m_pDeviceObject;
+    ULONG                       m_ulStreamId;
+    ULONG                       m_ulOffloadStreamId;
     PSAVEWORKER_PARAM           m_pWorkItems;
 
     BOOL                        m_fWriteDisabled;
@@ -126,16 +126,9 @@ public:
     );
     NTSTATUS                    Initialize
     (
-        _In_ BOOL               _bOffloaded
+        _In_ BOOL               _bOffloaded,
+        _In_ PDEVICE_OBJECT     DeviceObject
     );
-	static NTSTATUS             SetDeviceObject
-	(
-	    _In_  PDEVICE_OBJECT    DeviceObject
-	);
-	static PDEVICE_OBJECT       GetDeviceObject
-	(
-	    void
-	);
     void                        ReadData
     (
         _Inout_updates_bytes_all_(ulByteCount)  PBYTE   pBuffer,

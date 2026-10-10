@@ -3,6 +3,7 @@ name: Transport
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   windows:
@@ -15,3 +16,19 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Endpoint inventory parser tests
+        shell: pwsh
+        run: ./scripts/lab-endpoint-inventory.tests.ps1
+      - name: Interactive probe argument tests
+        shell: pwsh
+        run: ./scripts/lab-interactive-probe.tests.ps1
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: wasapi-bridge-probe-x64
+          path: |
+            build/Release/sar_endpoint_manager.exe
+            build/Release/wasapi_bridge_probe.exe
+            build/Release/wasapi_dual_bus_probe.exe
+          if-no-files-found: error
+          retention-days: 3

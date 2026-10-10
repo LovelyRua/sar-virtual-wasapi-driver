@@ -446,6 +446,18 @@ DECLARE_INTERFACE_(IMiniportChange, IUnknown)
 ///////////////////////////////////////////////////////////////////////////////
 // IAdapterCommon
 //
+typedef struct _SAR_BRIDGE_STATS
+{
+    ULONG QueuedFrames;
+    ULONG PeakQueuedFrames;
+    ULONGLONG DroppedFrames;
+    ULONGLONG SilentFrames;
+    ULONGLONG InvalidWriteBytes;
+    ULONGLONG InvalidReadBytes;
+    ULONGLONG WriteCalls;
+    ULONGLONG ReadCalls;
+} SAR_BRIDGE_STATS, *PSAR_BRIDGE_STATS;
+
 DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
 {
     STDMETHOD_(NTSTATUS,        Init) 
@@ -467,6 +479,31 @@ DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
     STDMETHOD_(WDFDEVICE,       GetWdfDevice)
     (
         THIS
+    ) PURE;
+
+    STDMETHOD_(VOID, BridgeWrite)
+    (
+        THIS_
+        _In_ ULONG Bus,
+        _In_reads_bytes_(Bytes) const BYTE* Data,
+        _In_ ULONG Bytes
+    ) PURE;
+
+    STDMETHOD_(VOID, BridgeRead)
+    (
+        THIS_
+        _In_ ULONG Bus,
+        _Out_writes_bytes_(Bytes) BYTE* Data,
+        _In_ ULONG Bytes
+    ) PURE;
+
+    STDMETHOD_(VOID, BridgeReset)(THIS_ _In_ ULONG Bus) PURE;
+
+    STDMETHOD_(VOID, BridgeGetStats)
+    (
+        THIS_
+        _In_ ULONG Bus,
+        _Out_ PSAR_BRIDGE_STATS Stats
     ) PURE;
 
     STDMETHOD_(VOID,            SetWaveServiceGroup) 

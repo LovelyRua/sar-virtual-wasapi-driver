@@ -30,14 +30,14 @@ Abstract:
 //
 // Max # of pin instances.
 //
-#define MICARRAY_MAX_INPUT_STREAMS              4
+#define MICARRAY_MAX_INPUT_STREAMS              1
 
 //=============================================================================
 static 
 KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArrayPinSupportedDeviceFormats[] =
 {
     // 0 - Note the ENDPOINT_MINIPAIR structures for the mic arrays use this first element as the proposed DEFAULT format
-    // 48 KHz 16-bit mono
+    // 48 KHz 16-bit stereo for the experimental bridge default
     {
         {
             sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
@@ -51,15 +51,15 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArrayPinSupportedDeviceFormats[] =
         {
             {
                 WAVE_FORMAT_EXTENSIBLE,
-                1,
-                48000,
-                96000,
                 2,
+                48000,
+                192000,
+                4,
                 16,
                 sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
             },
             16,
-            KSAUDIO_SPEAKER_MONO,
+            KSAUDIO_SPEAKER_STEREO,
             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
         }
     },
@@ -253,7 +253,7 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArrayPinSupportedDeviceFormats[] =
         }
     },
     // 8 - Note the ENDPOINT_MINIPAIR structures for the mic arrays use this last element as the proposed RAW format
-    // 48 KHz 32-bit 2 channels
+    // 48 KHz 16-bit 2 channels for the first SAR bridge prototype
     {
         {
             sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE),
@@ -269,13 +269,13 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArrayPinSupportedDeviceFormats[] =
                 WAVE_FORMAT_EXTENSIBLE,
                 2,
                 48000,
-                384000,
-                8,
-                32,
+                192000,
+                4,
+                16,
                 sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
             },
-            32,
-            0,                                      // No channel configuration for unprocessed mic array
+            16,
+            KSAUDIO_SPEAKER_STEREO,
             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
         }
     },
@@ -400,8 +400,8 @@ KSDATARANGE_AUDIO MicArrayPinDataRangesRawStream[] =
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
         MICARRAY_RAW_CHANNELS,           
-        MICARRAY_32_BITS_PER_SAMPLE_PCM,    
-        MICARRAY_32_BITS_PER_SAMPLE_PCM,    
+        MICARRAY_16_BITS_PER_SAMPLE_PCM,
+        MICARRAY_16_BITS_PER_SAMPLE_PCM,
         MICARRAY_RAW_SAMPLE_RATE,            
         MICARRAY_RAW_SAMPLE_RATE             
     },
@@ -532,7 +532,7 @@ KSDATARANGE_AUDIO MicArrayPinDataRangesProcessedStream[] =
             STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
-        MICARRAY_PROCESSED_CHANNELS,
+        MICARRAY_DEVICE_MAX_CHANNELS,
         MICARRAY_16_BITS_PER_SAMPLE_PCM,
         MICARRAY_16_BITS_PER_SAMPLE_PCM,
         MICARRAY_PROCESSED_MAX_SAMPLE_RATE,
