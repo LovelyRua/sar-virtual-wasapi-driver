@@ -140,7 +140,13 @@ build\Release\wasapi_dual_bus_probe.exe "<Bus 0 render ID>" "<Bus 0 capture ID>"
 
 The multi-bus probe reports per-channel minimum/maximum tone level and the
 cross-window spread in dBFS. This content-level diagnostic is independent of
-the strict packet-continuity result. To opt into an additional stability gate,
+the strict packet-continuity result. The strict gate evaluates only the span
+after the one-second warmup and requires zero WASAPI discontinuity flags,
+timestamp errors, device-position gaps, and overlaps, plus the minimum measured
+frame counts. A packet crossing the warmup boundary is clipped to its first
+measured frame before its position/QPC is compared. The summary reports both
+whole-run timeline diagnostics and measured-span continuity counters, including
+the largest single position gap/overlap in frames. To opt into an additional stability gate,
 append `--max-level-spread-db <0.1..60>` after the normal arguments; for
 example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. A run can therefore pass signal
 content while failing continuity, level stability, or both. The optional level
@@ -497,8 +503,9 @@ multi-bus probe. It reports position gaps/overlaps, timestamp errors, QPC
 regressions, and maximum frame-clock/QPC delta error in addition to the
 `DATA_DISCONTINUITY` flag. The tracker has deterministic tests for contiguous
 packets, gaps, overlaps, invalid timestamps, QPC regressions, and arithmetic
-bounds. The probe does not use these diagnostic values to relax its strict
-zero-discontinuity acceptance gate.
+bounds. The strict gate now consumes measured-span discontinuity, timestamp,
+gap, and overlap evidence; whole-run startup diagnostics remain visible without
+letting warmup events produce false failures.
 
 The first VM24 runs exposed a measurement issue: the probe synchronously
 printed every discontinuity from the capture servicing thread. Commit

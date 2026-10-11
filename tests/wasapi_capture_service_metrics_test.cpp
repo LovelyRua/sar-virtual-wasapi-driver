@@ -1,4 +1,5 @@
 #include "src/wasapi_capture_service_metrics.h"
+#include "src/wasapi_capture_continuity_gate.h"
 
 #include <cstdint>
 #include <limits>
@@ -62,5 +63,12 @@ int main() {
             std::numeric_limits<std::uint64_t>::max() ||
         metrics.stats().total_timestamp_age_100ns !=
             std::numeric_limits<std::uint64_t>::max()) return 5;
+
+    // Late servicing is important diagnostic evidence, but it is not itself
+    // a device-position gap. Keep that distinction in the strict gate.
+    sar_driver::CaptureTimelineStats contiguous{};
+    if (!sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
+        return 6;
+    }
     return 0;
 }

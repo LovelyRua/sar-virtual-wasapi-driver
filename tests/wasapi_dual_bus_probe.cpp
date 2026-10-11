@@ -10,6 +10,8 @@
 #include "src/signal_window_queue.h"
 #include "src/wasapi_capture_timeline.h"
 #include "src/wasapi_capture_service_metrics.h"
+#include "src/wasapi_capture_continuity_tracker.h"
+#include "src/wasapi_capture_continuity_gate.h"
 #include "src/signal_level_monitor.h"
 #include "src/wasapi_probe_options.h"
 
@@ -153,7 +155,6 @@ public:
         for (unsigned frame = 0; frame < sar_driver::kProbeRate; ++frame) {
             toneTable_.push_back(sar_driver::ProbeFrame(bus_, frame));
         }
-        warmupFrames_ = sar_driver::kProbeRate;
     }
 
     void StartAnalyzer() {
@@ -276,16 +277,20 @@ public:
                               (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
                               silent,
                               (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
+            auto continuityPacket = continuity_tracker_.Observe(
+                devicePosition, qpcPosition, frames,
+                (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
+                silent, (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
             ++capturePackets_;
             if (frames > maximumPacketFrames_) maximumPacketFrames_ = frames;
             if (silent) ++silentPackets_;
             if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0 &&
-                warmupFrames_ == 0) {
+                continuityPacket.measured_frames != 0) {
                 ++discontinuities_;
             }
             for (UINT32 frame = 0; frame < frames; ++frame) {
-                if (warmupFrames_ != 0) {
-                    --warmupFrames_;
+                if (continuityPacket.warmup_frames != 0) {
+                    --continuityPacket.warmup_frames;
                     continue;
                 }
                 float frame_samples[2]{};
@@ -381,9 +386,9 @@ public:
     }
 
     bool ContinuityPassed(unsigned seconds) const {
-        return discontinuities_ == 0 &&
-               capturedFrames_ >= sar_driver::kProbeRate * (seconds - 2) &&
-               sentFrames_ >= sar_driver::kProbeRate * (seconds - 2);
+        return sar_driver::CaptureContinuityPassed(
+            continuity_tracker_.stats(), continuity_tracker_.measured_frames(), sentFrames_,
+            sar_driver::kProbeRate * (seconds - 2));
     }
 
     void Summary() const {
@@ -403,8 +408,29 @@ public:
                   << " timestamp_errors=" << timeline.timestamp_error_packets
                   << " position_gap_packets=" << timeline.position_gap_packets
                   << " position_gap_frames=" << timeline.position_gap_frames
+                  << " maximum_position_gap_frames="
+                  << timeline.maximum_position_gap_frames
                   << " position_overlap_packets=" << timeline.position_overlap_packets
                   << " position_overlap_frames=" << timeline.position_overlap_frames
+                  << " maximum_position_overlap_frames="
+                  << timeline.maximum_position_overlap_frames
+                  << " measured_captured_frames=" << continuity_tracker_.measured_frames()
+                  << " measured_discontinuities="
+                  << continuity_tracker_.stats().discontinuity_packets
+                  << " measured_timestamp_errors="
+                  << continuity_tracker_.stats().timestamp_error_packets
+                  << " measured_position_gap_packets="
+                  << continuity_tracker_.stats().position_gap_packets
+                  << " measured_position_gap_frames="
+                  << continuity_tracker_.stats().position_gap_frames
+                  << " measured_maximum_position_gap_frames="
+                  << continuity_tracker_.stats().maximum_position_gap_frames
+                  << " measured_position_overlap_packets="
+                  << continuity_tracker_.stats().position_overlap_packets
+                  << " measured_position_overlap_frames="
+                  << continuity_tracker_.stats().position_overlap_frames
+                  << " measured_maximum_position_overlap_frames="
+                  << continuity_tracker_.stats().maximum_position_overlap_frames
                   << " qpc_regressions=" << timeline.qpc_regressions
                   << " max_qpc_delta_error_100ns="
                   << timeline.maximum_qpc_delta_error_100ns
@@ -455,10 +481,11 @@ private:
     UINT32 maximumPacketFrames_ = 0;
     unsigned discontinuities_ = 0;
     sar_driver::WasapiCaptureTimeline timeline_;
+    sar_driver::WasapiCaptureContinuityTracker continuity_tracker_{
+        sar_driver::kProbeRate, sar_driver::kProbeRate};
     sar_driver::WasapiCaptureServiceMetrics service_metrics_;
     std::uint64_t capture_period_100ns_ = 0;
     std::uint64_t qpc_frequency_ = 0;
-    std::size_t warmupFrames_ = 0;
     std::array<float, AnalysisQueue::kSamplesPerWindow> pending_window_{};
     std::size_t pending_frames_ = 0;
     AnalysisQueue analysis_queue_;

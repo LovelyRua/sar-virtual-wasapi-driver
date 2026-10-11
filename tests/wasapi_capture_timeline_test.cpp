@@ -24,7 +24,9 @@ bool test_gap_and_overlap_are_measured_in_frames() {
     timeline.Observe(220, 3000, 64, 48000, false, true, false);
     const auto& stats = timeline.stats();
     return stats.position_gap_packets == 1 && stats.position_gap_frames == 6 &&
+           stats.maximum_position_gap_frames == 6 &&
            stats.position_overlap_packets == 1 && stats.position_overlap_frames == 14 &&
+           stats.maximum_position_overlap_frames == 14 &&
            stats.discontinuity_packets == 1 && stats.silent_packets == 1;
 }
 
@@ -57,7 +59,19 @@ bool test_extreme_positions_saturate_without_wrapping() {
     return timeline.stats().position_gap_packets == 1 &&
            timeline.stats().position_gap_frames ==
                std::numeric_limits<std::uint64_t>::max() - 3 &&
+           timeline.stats().maximum_position_gap_frames ==
+               std::numeric_limits<std::uint64_t>::max() - 3 &&
            timeline.stats().packets == 2;
+}
+
+bool test_maximum_gap_reports_the_largest_single_event() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(0, 0, 10, 48000, false, false, false);
+    timeline.Observe(12, 2500, 10, 48000, false, false, false);
+    timeline.Observe(40, 8000, 10, 48000, false, false, false);
+    const auto& stats = timeline.stats();
+    return stats.position_gap_packets == 2 && stats.position_gap_frames == 20 &&
+           stats.maximum_position_gap_frames == 18;
 }
 
 bool test_timestamp_error_restarts_with_a_clean_reference_packet() {
@@ -112,7 +126,8 @@ int main() {
                    test_timestamp_error_restarts_with_a_clean_reference_packet() &&
                    test_qpc_delta_error_tracks_clock_drift_without_frame_gap() &&
                    test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range() &&
-                   test_discontinuity_is_not_hidden_by_contiguous_followup_packets()
+                   test_discontinuity_is_not_hidden_by_contiguous_followup_packets() &&
+                   test_maximum_gap_reports_the_largest_single_event()
                ? 0
                : 1;
 }

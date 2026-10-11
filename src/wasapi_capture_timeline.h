@@ -12,8 +12,10 @@ struct CaptureTimelineStats {
     std::uint64_t timestamp_error_packets = 0;
     std::uint64_t position_gap_packets = 0;
     std::uint64_t position_gap_frames = 0;
+    std::uint64_t maximum_position_gap_frames = 0;
     std::uint64_t position_overlap_packets = 0;
     std::uint64_t position_overlap_frames = 0;
+    std::uint64_t maximum_position_overlap_frames = 0;
     std::uint64_t qpc_regressions = 0;
     std::uint64_t maximum_qpc_delta_error_100ns = 0;
 };
@@ -34,10 +36,18 @@ public:
             const std::uint64_t expected = SaturatingAdd(previous_position_, previous_frames_);
             if (device_position > expected) {
                 ++stats_.position_gap_packets;
-                AddSaturated(stats_.position_gap_frames, device_position - expected);
+                const auto gap = device_position - expected;
+                AddSaturated(stats_.position_gap_frames, gap);
+                if (gap > stats_.maximum_position_gap_frames) {
+                    stats_.maximum_position_gap_frames = gap;
+                }
             } else if (device_position < expected) {
                 ++stats_.position_overlap_packets;
-                AddSaturated(stats_.position_overlap_frames, expected - device_position);
+                const auto overlap = expected - device_position;
+                AddSaturated(stats_.position_overlap_frames, overlap);
+                if (overlap > stats_.maximum_position_overlap_frames) {
+                    stats_.maximum_position_overlap_frames = overlap;
+                }
             }
 
             if (qpc_position_100ns < previous_qpc_) {

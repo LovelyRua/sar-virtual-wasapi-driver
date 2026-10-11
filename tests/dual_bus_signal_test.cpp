@@ -1,4 +1,5 @@
 #include "src/dual_bus_signal.h"
+#include "src/wasapi_capture_continuity_gate.h"
 #include "src/signal_level_monitor.h"
 
 #include <array>
@@ -254,6 +255,12 @@ void TestSpectralAnalysisDoesNotProveTimelineContinuity() {
     const auto result = AnalyzeSignalWindow(captured.data(), kProbeRate, 0);
     Expect(result.passed(),
            "a spectral content pass must not be mistaken for a continuity pass");
+    sar_driver::CaptureTimelineStats timeline{};
+    timeline.position_gap_packets = 1;
+    timeline.position_gap_frames = droppedFrames;
+    Expect(!sar_driver::CaptureContinuityPassed(
+               timeline, kProbeRate, kProbeRate, kProbeRate),
+           "a measured device-position gap must fail strict continuity despite valid tones");
 }
 
 void TestLevelMonitorTracksCrossWindowSpread() {

@@ -55,6 +55,28 @@ else()
 endif()
 add_test(NAME wasapi_capture_timeline_test COMMAND wasapi_capture_timeline_test)
 
+add_executable(wasapi_capture_continuity_tracker_test
+  tests/wasapi_capture_continuity_tracker_test.cpp)
+target_compile_features(wasapi_capture_continuity_tracker_test PRIVATE cxx_std_17)
+target_include_directories(wasapi_capture_continuity_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(wasapi_capture_continuity_tracker_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(wasapi_capture_continuity_tracker_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME wasapi_capture_continuity_tracker_test COMMAND wasapi_capture_continuity_tracker_test)
+
+add_executable(wasapi_capture_continuity_gate_test
+  tests/wasapi_capture_continuity_gate_test.cpp)
+target_compile_features(wasapi_capture_continuity_gate_test PRIVATE cxx_std_17)
+target_include_directories(wasapi_capture_continuity_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(wasapi_capture_continuity_gate_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(wasapi_capture_continuity_gate_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME wasapi_capture_continuity_gate_test COMMAND wasapi_capture_continuity_gate_test)
+
 add_executable(wasapi_capture_service_metrics_test
   tests/wasapi_capture_service_metrics_test.cpp)
 target_compile_features(wasapi_capture_service_metrics_test PRIVATE cxx_std_17)
