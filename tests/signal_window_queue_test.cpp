@@ -276,10 +276,15 @@ bool test_single_producer_consumer_publication() {
         if (consumed) {
             ++expected;
         } else if (producer_done.load(std::memory_order_acquire)) {
-            valid.store(false, std::memory_order_relaxed);
-            failure_reason = 3;
-            failure_expected = expected;
-            break;
+            // The empty read can precede the acquire of producer_done. Once
+            // completion is visible, recheck the queue before declaring loss.
+            if (queue.queued_windows() == 0) {
+                valid.store(false, std::memory_order_relaxed);
+                failure_reason = 3;
+                failure_expected = expected;
+                break;
+            }
+            std::this_thread::yield();
         } else {
             std::this_thread::yield();
         }
