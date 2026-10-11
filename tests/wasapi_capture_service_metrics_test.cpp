@@ -44,5 +44,23 @@ int main() {
         metrics.stats().packets_over_late_threshold != 1 ||
         metrics.stats().packets_with_valid_timestamp != 5 ||
         metrics.stats().packets_with_future_timestamp != 1) return 3;
+
+    // A later empty service pass must not erase prior latency or packet counts.
+    metrics.BeginPass();
+    metrics.ObservePacket(10000, 13000, 1000);
+    metrics.ObservePacket(13000, 16000, 1000);
+    metrics.ObservePacket(16000, 17000, 1000);
+    metrics.EndPass();
+    metrics.BeginPass();
+    metrics.EndPass();
+    if (metrics.stats().service_passes != 7 ||
+        metrics.stats().empty_service_passes != 2 ||
+        metrics.stats().maximum_packets_per_pass != 3 ||
+        metrics.stats().packets != 9 ||
+        metrics.stats().packets_over_late_threshold != 3 ||
+        metrics.stats().maximum_timestamp_age_100ns !=
+            std::numeric_limits<std::uint64_t>::max() ||
+        metrics.stats().total_timestamp_age_100ns !=
+            std::numeric_limits<std::uint64_t>::max()) return 5;
     return 0;
 }

@@ -10,6 +10,7 @@
 #include "src/signal_window_queue.h"
 #include "src/wasapi_capture_timeline.h"
 #include "src/wasapi_capture_service_metrics.h"
+#include "src/signal_level_monitor.h"
 #include "src/wasapi_probe_options.h"
 
 #include <algorithm>
@@ -167,6 +168,10 @@ public:
             analysis_event_ = nullptr;
             throw;
         }
+    }
+
+    void SetMaximumLevelSpread(double value) {
+        maximum_level_spread_db_ = value;
     }
 
     void StopAnalyzer() noexcept {
@@ -335,6 +340,7 @@ public:
                 [this](const float* samples, std::size_t) {
                     const auto result = sar_driver::AnalyzeSignalWindow(
                         samples, sar_driver::kProbeRate, bus_);
+                    level_monitor_.Observe(result.expected_power);
                     ++windows_;
                     if (!result.passed()) ++failed_windows_;
                     const std::lock_guard<std::mutex> lock(g_analysis_output_mutex);
@@ -346,6 +352,8 @@ public:
                               << " bus_leak_left=" << result.other_bus_power[0]
                               << " bus_leak_right=" << result.other_bus_power[1]
                               << " peak=" << result.peak_absolute_sample
+                              << " level_spread_left_db=" << level_monitor_.stats().spread_db(0)
+                              << " level_spread_right_db=" << level_monitor_.stats().spread_db(1)
                               << " clipped_samples=" << result.clipped_samples
                               << " non_finite_samples=" << result.non_finite_samples
                               << " passed=" << static_cast<int>(result.passed()) << '\n';
@@ -367,6 +375,11 @@ public:
                analysis_wait_failures_.load(std::memory_order_relaxed) == 0;
     }
 
+    bool LevelPassed() const {
+        return maximum_level_spread_db_ <= 0.0 ||
+               level_monitor_.WithinSpread(maximum_level_spread_db_);
+    }
+
     bool ContinuityPassed(unsigned seconds) const {
         return discontinuities_ == 0 &&
                capturedFrames_ >= sar_driver::kProbeRate * (seconds - 2) &&
@@ -378,6 +391,7 @@ public:
         const auto& service = service_metrics_.stats();
         const auto meanPacketAge = service.packets_with_valid_timestamp == 0 ? 0 :
             service.total_timestamp_age_100ns / service.packets_with_valid_timestamp;
+        const auto& levels = level_monitor_.stats();
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
@@ -405,6 +419,16 @@ public:
                   << service.packets_with_future_timestamp
                   << " windows=" << windows_
                   << " failed_windows=" << failed_windows_
+                  << " valid_level_windows=" << levels.valid_windows
+                  << " invalid_level_windows=" << levels.invalid_windows
+                  << " min_level_left_dbfs=" << levels.minimum_dbfs(0)
+                  << " max_level_left_dbfs=" << levels.maximum_dbfs(0)
+                  << " level_spread_left_db=" << levels.spread_db(0)
+                  << " min_level_right_dbfs=" << levels.minimum_dbfs(1)
+                  << " max_level_right_dbfs=" << levels.maximum_dbfs(1)
+                  << " level_spread_right_db=" << levels.spread_db(1)
+                  << " level_limit_db=" << maximum_level_spread_db_
+                  << " level_passed=" << static_cast<int>(LevelPassed())
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()
                   << " invalid_analysis_windows=" << analysis_queue_.invalid_pushes()
                   << " analysis_signal_failures="
@@ -445,6 +469,8 @@ private:
     std::atomic_uint64_t analysis_wait_failures_{0};
     unsigned windows_ = 0;
     unsigned failed_windows_ = 0;
+    double maximum_level_spread_db_ = 0.0;
+    sar_driver::SignalLevelMonitor level_monitor_;
     bool renderStarted_ = false;
     bool captureStarted_ = false;
     Clock::time_point lastPacket_{};
@@ -453,8 +479,11 @@ private:
     std::vector<std::array<std::int16_t, 2>> toneTable_;
 };
 
-int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
-        unsigned seconds) {
+int Run(const sar_driver::WasapiProbeOptions& options) {
+    const auto* ids = options.endpoint_ids.data();
+    const auto pairCount = static_cast<unsigned>(options.pair_count);
+    const auto firstBus = options.first_bus;
+    const auto seconds = options.duration_seconds;
     if (pairCount == 0 || pairCount > sar_driver::kMaximumProbeBuses ||
         firstBus + pairCount > sar_driver::kProbeBuses) {
         throw std::runtime_error("Invalid WASAPI probe bus range");
@@ -479,7 +508,10 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
                                  std::to_string(GetLastError()));
     }
     try {
-        for (auto& stream : streams) stream.StartAnalyzer();
+        for (auto& stream : streams) {
+            stream.SetMaximumLevelSpread(options.maximum_level_spread_db);
+            stream.StartAnalyzer();
+        }
         for (auto& stream : streams) stream.StartCapture();
         for (auto& stream : streams) stream.StartRender();
         for (const auto& stream : streams) {
@@ -515,14 +547,18 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
     for (const auto& stream : streams) stream.Summary();
     bool contentPassed = true;
     bool continuityPassed = true;
+    bool levelPassed = true;
     for (const auto& stream : streams) {
         contentPassed = stream.ContentPassed(seconds) && contentPassed;
         continuityPassed = stream.ContinuityPassed(seconds) && continuityPassed;
+        levelPassed = stream.LevelPassed() && levelPassed;
     }
-    const bool passed = contentPassed && continuityPassed;
+    const bool passed = contentPassed && continuityPassed && levelPassed;
     std::cout << "multi_bus_probe passed=" << static_cast<int>(passed)
               << " content_passed=" << static_cast<int>(contentPassed)
               << " continuity_passed=" << static_cast<int>(continuityPassed)
+              << " level_limit_db=" << options.maximum_level_spread_db
+              << " level_passed=" << static_cast<int>(levelPassed)
               << " active_buses=" << pairCount
               << " duration_seconds=" << seconds << '\n';
     return passed ? 0 : 3;
@@ -531,7 +567,7 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    std::array<const wchar_t*, 11> arguments{};
+    std::array<const wchar_t*, 13> arguments{};
     if (argc > static_cast<int>(arguments.size())) {
         std::wcerr << L"Probe accepts at most four endpoint pairs.\n";
         return 1;
@@ -548,6 +584,7 @@ int wmain(int argc, wchar_t** argv) {
                       L" <render> <capture> <seconds>\n"
                       L"   or: wasapi_dual_bus_probe --multi <seconds>"
                       L" <render1> <capture1> ... <render4> <capture4>\n"
+                      L"Optional suffix: --max-level-spread-db <0.1..60>\n"
                    << option_error << L'\n';
         return 1;
     }
@@ -559,9 +596,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     int result = 1;
     try {
-        result = Run(options.endpoint_ids.data(),
-                     static_cast<unsigned>(options.pair_count),
-                     options.first_bus, options.duration_seconds);
+        result = Run(options);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
     }

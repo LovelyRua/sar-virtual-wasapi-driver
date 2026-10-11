@@ -14,6 +14,7 @@ struct WasapiProbeOptions {
     unsigned duration_seconds = 0;
     unsigned first_bus = 0;
     std::size_t pair_count = 0;
+    double maximum_level_spread_db = 0.0;
     std::array<const wchar_t*, kMaximumProbeBuses * 2> endpoint_ids{};
 };
 

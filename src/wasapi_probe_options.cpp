@@ -1,6 +1,7 @@
 #include "src/wasapi_probe_options.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cwchar>
 #include <cwctype>
 #include <utility>
@@ -87,6 +88,30 @@ bool set_pairs(const wchar_t* const* ids, std::size_t pair_count,
     return true;
 }
 
+bool strip_level_limit(int& argc, const wchar_t* const* argv,
+                       WasapiProbeOptions& options, std::wstring& error) {
+    if (argc < 2 || argv[argc - 2] == nullptr ||
+        std::wcscmp(argv[argc - 2], L"--max-level-spread-db") != 0) {
+        return true;
+    }
+    const wchar_t* text = argv[argc - 1];
+    if (text == nullptr || *text == L'\0') {
+        error = L"Level spread limit must be a number from 0.1 to 60 dB.";
+        return false;
+    }
+    wchar_t* end = nullptr;
+    errno = 0;
+    const double value = std::wcstod(text, &end);
+    if (errno != 0 || end == text || *end != L'\0' || !std::isfinite(value) ||
+        value < 0.1 || value > 60.0) {
+        error = L"Level spread limit must be a number from 0.1 to 60 dB.";
+        return false;
+    }
+    options.maximum_level_spread_db = value;
+    argc -= 2;
+    return true;
+}
+
 }  // namespace
 
 bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
@@ -99,6 +124,11 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
         return false;
     }
     WasapiProbeOptions candidate;
+    if (!strip_level_limit(argc, argv, candidate, error)) return false;
+    if (argc < 2) {
+        error = L"Missing probe arguments.";
+        return false;
+    }
 
     if (std::wcscmp(argv[1], L"--single") == 0) {
         unsigned bus = 0;

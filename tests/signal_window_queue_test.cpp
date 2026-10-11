@@ -206,6 +206,31 @@ bool test_partial_drain_retains_remaining_fifo_entries() {
     return queue.queued_windows() == 0 && queue.dropped_windows() == 0;
 }
 
+bool test_dropped_windows_remain_visible_after_queue_recovers() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    for (unsigned id = 1; id <= 3; ++id) {
+        window.fill(static_cast<float>(id));
+        if (!queue.try_push(window.data(), window.size())) return false;
+    }
+    window.fill(4.0F);
+    if (queue.try_push(window.data(), window.size()) || queue.dropped_windows() != 1) {
+        return false;
+    }
+    for (unsigned expected = 1; expected <= 3; ++expected) {
+        bool intact = false;
+        if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+                intact = count == kSamples && samples[0] == expected &&
+                         samples[count - 1] == expected;
+            }) || !intact) {
+            return false;
+        }
+    }
+    window.fill(5.0F);
+    return queue.try_push(window.data(), window.size()) &&
+           queue.dropped_windows() == 1 && queue.queued_windows() == 1;
+}
+
 bool test_single_producer_consumer_publication() {
     constexpr unsigned kWindowCount = 20000;
     Queue queue;
@@ -285,6 +310,7 @@ int main() {
         test_full_queue_keeps_oldest_windows_and_rejects_newest,
         test_multiple_queue_wraps_keep_window_edges_intact,
         test_partial_drain_retains_remaining_fifo_entries,
+        test_dropped_windows_remain_visible_after_queue_recovers,
         test_single_producer_consumer_publication};
     const char* names[] = {
         "invalid windows",
@@ -297,6 +323,7 @@ int main() {
         "full queue preserves oldest windows",
         "repeated queue wraps preserve window edges",
         "partial drain preserves FIFO entries",
+        "dropped analysis window remains visible after recovery",
         "SPSC publication stress"};
     for (std::size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); ++index) {
         if (!tests[index]()) {

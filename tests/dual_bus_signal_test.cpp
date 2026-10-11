@@ -1,4 +1,5 @@
 #include "src/dual_bus_signal.h"
+#include "src/signal_level_monitor.h"
 
 #include <array>
 #include <cmath>
@@ -255,6 +256,40 @@ void TestSpectralAnalysisDoesNotProveTimelineContinuity() {
            "a spectral content pass must not be mistaken for a continuity pass");
 }
 
+void TestLevelMonitorTracksCrossWindowSpread() {
+    sar_driver::SignalLevelMonitor monitor;
+    Expect(!monitor.WithinSpread(6.0), "empty level monitor cannot pass a limit");
+    monitor.Observe({0.04, 0.04});
+    monitor.Observe({0.02, 0.02});
+    Expect(monitor.stats().valid_windows == 2 &&
+               monitor.stats().invalid_windows == 0,
+           "valid windows must contribute to the level summary");
+    Expect(monitor.WithinSpread(3.1), "a 3 dB power spread must pass a 3.1 dB limit");
+    Expect(!monitor.WithinSpread(2.9), "level threshold must reject an undersized limit");
+    Expect(std::abs(monitor.stats().spread_db(0) - 10.0 * std::log10(2.0)) < 1e-9,
+           "level spread must be expressed as a power ratio in dB");
+    Expect(std::abs(monitor.stats().minimum_dbfs(1) - 10.0 * std::log10(0.02)) < 1e-9,
+           "minimum level must be reported relative to full scale");
+}
+
+void TestInvalidLevelWindowDoesNotPoisonValidRange() {
+    sar_driver::SignalLevelMonitor monitor;
+    monitor.Observe({0.04, 0.04});
+    monitor.Observe({0.0, 0.03});
+    monitor.Observe({std::numeric_limits<double>::infinity(), 0.04});
+    monitor.Observe({0.02, 0.02});
+    Expect(monitor.stats().valid_windows == 2 &&
+               monitor.stats().invalid_windows == 2,
+           "invalid windows must be counted without changing valid extrema");
+    Expect(!monitor.WithinSpread(4.0), "an invalid window must fail the optional level gate");
+    Expect(std::abs(monitor.stats().spread_db(0) - 10.0 * std::log10(2.0)) < 1e-9,
+           "invalid windows must not widen the valid level range");
+    Expect(std::isinf(monitor.stats().spread_db(2)),
+           "out-of-range channel queries must fail closed");
+    Expect(!monitor.WithinSpread(std::numeric_limits<double>::quiet_NaN()),
+           "non-finite level limits must fail closed");
+}
+
 } // namespace
 
 int main() {
@@ -268,6 +303,8 @@ int main() {
     TestSampleIntegrity();
     TestSignalThresholdBoundaries();
     TestSpectralAnalysisDoesNotProveTimelineContinuity();
+    TestLevelMonitorTracksCrossWindowSpread();
+    TestInvalidLevelWindowDoesNotPoisonValidRange();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;

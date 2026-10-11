@@ -91,6 +91,16 @@ bool test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range() {
            timeline.stats().packets == 2;
 }
 
+bool test_discontinuity_is_not_hidden_by_contiguous_followup_packets() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(0, 0, 480, 48000, false, false, false);
+    timeline.Observe(480, 100000, 480, 48000, true, false, false);
+    timeline.Observe(960, 200000, 480, 48000, false, false, false);
+    const auto& stats = timeline.stats();
+    return stats.discontinuity_packets == 1 && stats.position_gap_packets == 0 &&
+           stats.position_overlap_packets == 0 && stats.packets == 3;
+}
+
 }  // namespace
 
 int main() {
@@ -101,7 +111,8 @@ int main() {
                    test_extreme_positions_saturate_without_wrapping() &&
                    test_timestamp_error_restarts_with_a_clean_reference_packet() &&
                    test_qpc_delta_error_tracks_clock_drift_without_frame_gap() &&
-                   test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range()
+                   test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range() &&
+                   test_discontinuity_is_not_hidden_by_contiguous_followup_packets()
                ? 0
                : 1;
 }

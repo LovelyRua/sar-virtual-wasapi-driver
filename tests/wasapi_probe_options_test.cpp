@@ -195,6 +195,37 @@ bool test_null_mode_argument_is_rejected_and_clears_error_state() {
            options.endpoint_ids[0] == nullptr && error == L"Missing probe arguments.";
 }
 
+bool test_level_spread_limit_is_optional_and_bounded() {
+    const std::array<const wchar_t*, 8> enabled{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"6.5"}};
+    const std::array<const wchar_t*, 8> too_small{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"0.09"}};
+    const std::array<const wchar_t*, 8> too_large{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"60.1"}};
+    const std::array<const wchar_t*, 8> non_finite{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"nan"}};
+    sar_driver::WasapiProbeOptions options;
+    if (!parse(enabled.data(), static_cast<int>(enabled.size()), options) ||
+        options.maximum_level_spread_db != 6.5 || options.pair_count != 1) return false;
+    if (parse(too_small.data(), static_cast<int>(too_small.size()), options) ||
+        options.maximum_level_spread_db != 0.0 || options.pair_count != 0) return false;
+    if (parse(too_large.data(), static_cast<int>(too_large.size()), options) ||
+        parse(non_finite.data(), static_cast<int>(non_finite.size()), options)) return false;
+    return !parse(enabled.data(), 7, options) && options.pair_count == 0;
+}
+
+bool test_level_spread_suffix_works_for_legacy_and_multi_modes() {
+    const std::array<const wchar_t*, 8> legacy{{L"probe", L"r0", L"c0", L"r1",
+        L"c1", L"15", L"--max-level-spread-db", L"12"}};
+    const std::array<const wchar_t*, 9> multi{{L"probe", L"--multi", L"15", L"r0",
+        L"c0", L"r1", L"c1", L"--max-level-spread-db", L"12"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(legacy.data(), static_cast<int>(legacy.size()), options) &&
+           options.pair_count == 2 && options.maximum_level_spread_db == 12.0 &&
+           parse(multi.data(), static_cast<int>(multi.size()), options) &&
+           options.pair_count == 2 && options.maximum_level_spread_db == 12.0;
+}
+
 }  // namespace
 
 int main() {
@@ -219,6 +250,8 @@ int main() {
                    test_invalid_reused_endpoint_does_not_publish_partial_options() &&
                    test_failure_clears_previously_published_options() &&
                    test_null_mode_argument_is_rejected_and_clears_error_state() &&
+                   test_level_spread_limit_is_optional_and_bounded() &&
+                   test_level_spread_suffix_works_for_legacy_and_multi_modes() &&
                    test_null_argument_array_is_rejected()
                ? 0
                : 1;

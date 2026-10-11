@@ -138,6 +138,14 @@ build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArr
 build\Release\wasapi_dual_bus_probe.exe "<Bus 0 render ID>" "<Bus 0 capture ID>" "<Bus 1 render ID>" "<Bus 1 capture ID>" 15
 ```
 
+The multi-bus probe reports per-channel minimum/maximum tone level and the
+cross-window spread in dBFS. This content-level diagnostic is independent of
+the strict packet-continuity result. To opt into an additional stability gate,
+append `--max-level-spread-db <0.1..60>` after the normal arguments; for
+example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. A run can therefore pass signal
+content while failing continuity, level stability, or both. The optional level
+limit defaults to disabled and does not relax the zero-discontinuity gate.
+
 The multi-bus probe can also run inside the already logged-on desktop session
 through the interactive launcher. It reports packet cadence, discontinuities,
 silence, peak level, clipping, and non-finite sample counts for each bus:
