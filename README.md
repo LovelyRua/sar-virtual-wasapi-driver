@@ -608,3 +608,15 @@ Checks confirmed the VB-Cable-only Media inventory was restored, no matching
 temporary certificate remained in LocalMachine My/Root/TrustedPublisher,
 firewall profiles remained enabled, and the previously authorized lab boot
 mode (Secure Boot off, test signing on) was unchanged.
+
+## Strict capture silence gate follow-up (2026-10-11)
+
+The measured-span continuity gate now rejects any WASAPI silent-buffer flag.
+This probe sends a known tone, and startup warmup packets remain excluded from
+the measured span; a brief silent packet must not be hidden by a passing
+one-second spectral window. The gate also rejects regressing QPC timestamps;
+clock-rate delta error remains diagnostic, but backward time is not valid
+continuity evidence. Capture-service latency remains diagnostic and cannot
+override these content/timeline failures. Regression coverage was added across
+the timeline, warmup tracker, continuity gate, service metrics, and dual-bus
+signal test modules. CI validation for this follow-up is pending.

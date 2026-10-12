@@ -13,7 +13,9 @@ inline bool CaptureContinuityPassed(const CaptureTimelineStats& timeline,
                                     std::uint64_t sent_frames,
                                     std::uint64_t required_frames) noexcept {
     return timeline.discontinuity_packets == 0 &&
+           timeline.silent_packets == 0 &&
            timeline.timestamp_error_packets == 0 &&
+           timeline.qpc_regressions == 0 &&
            timeline.position_gap_packets == 0 &&
            timeline.position_overlap_packets == 0 &&
            captured_frames >= required_frames && sent_frames >= required_frames;

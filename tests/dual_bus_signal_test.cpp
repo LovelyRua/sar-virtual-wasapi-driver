@@ -261,6 +261,16 @@ void TestSpectralAnalysisDoesNotProveTimelineContinuity() {
     Expect(!sar_driver::CaptureContinuityPassed(
                timeline, kProbeRate, kProbeRate, kProbeRate),
            "a measured device-position gap must fail strict continuity despite valid tones");
+    timeline = {};
+    timeline.silent_packets = 1;
+    Expect(!sar_driver::CaptureContinuityPassed(
+               timeline, kProbeRate, kProbeRate, kProbeRate),
+           "a measured silent packet must fail strict continuity even if the full-window spectrum passes");
+    timeline = {};
+    timeline.qpc_regressions = 1;
+    Expect(!sar_driver::CaptureContinuityPassed(
+               timeline, kProbeRate, kProbeRate, kProbeRate),
+           "a QPC regression must fail strict continuity even if the full-window spectrum passes");
 }
 
 void TestLevelMonitorTracksCrossWindowSpread() {

@@ -70,5 +70,22 @@ int main() {
     if (!sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
         return 6;
     }
+    sar_driver::WasapiCaptureServiceMetrics timely;
+    timely.BeginPass();
+    timely.ObservePacket(1000, 1100, 1000);
+    timely.EndPass();
+    sar_driver::CaptureTimelineStats silentCapture{};
+    silentCapture.silent_packets = 1;
+    if (timely.stats().packets_over_late_threshold != 0 ||
+        timely.stats().packets_with_future_timestamp != 0 ||
+        sar_driver::CaptureContinuityPassed(silentCapture, 48000, 48000, 48000)) {
+        return 7;
+    }
+    sar_driver::CaptureTimelineStats regressedCapture{};
+    regressedCapture.qpc_regressions = 1;
+    if (timely.stats().packets_over_late_threshold != 0 ||
+        sar_driver::CaptureContinuityPassed(regressedCapture, 48000, 48000, 48000)) {
+        return 8;
+    }
     return 0;
 }

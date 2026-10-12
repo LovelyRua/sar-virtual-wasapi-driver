@@ -58,6 +58,27 @@ bool invalid_sample_rate_fails_closed() {
            tracker.stats().packets == 1;
 }
 
+bool warmup_silence_is_excluded_but_measured_silence_is_retained() {
+    sar_driver::WasapiCaptureContinuityTracker tracker(48000, 480);
+    tracker.Observe(0, 1000000, 480, false, true, false);
+    if (tracker.stats().silent_packets != 0 || tracker.stats().packets != 0) {
+        return false;
+    }
+    tracker.Observe(480, 1100000, 480, false, true, false);
+    return tracker.stats().silent_packets == 1 && tracker.stats().packets == 1 &&
+           tracker.measured_frames() == 480;
+}
+
+bool measured_qpc_regression_is_retained_after_warmup() {
+    sar_driver::WasapiCaptureContinuityTracker tracker(48000, 480);
+    tracker.Observe(0, 1000000, 480, false, false, false);
+    tracker.Observe(480, 1100000, 480, false, false, false);
+    tracker.Observe(960, 1000000, 480, false, false, false);
+    return tracker.stats().qpc_regressions == 1 &&
+           tracker.stats().position_gap_packets == 0 &&
+           tracker.measured_frames() == 960;
+}
+
 }  // namespace
 
 int main() {
@@ -65,7 +86,9 @@ int main() {
                    packet_crossing_warmup_advances_position_and_qpc() &&
                    only_post_warmup_position_errors_fail_measured_span() &&
                    post_warmup_timestamp_errors_remain_visible_after_recovery() &&
-                   invalid_sample_rate_fails_closed()
+                   invalid_sample_rate_fails_closed() &&
+                   warmup_silence_is_excluded_but_measured_silence_is_retained() &&
+                   measured_qpc_regression_is_retained_after_warmup()
                ? 0
                : 1;
 }
