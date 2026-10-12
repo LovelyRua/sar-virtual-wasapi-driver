@@ -1,7 +1,7 @@
 #pragma once
 
-#include <avrt.h>
 #include <windows.h>
+#include <avrt.h>
 
 namespace sar_driver {
 
