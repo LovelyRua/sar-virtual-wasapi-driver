@@ -61,6 +61,24 @@ int main() {
             sar_driver::CaptureContinuityFailures(overlap, 96000, 96000, 96000),
             sar_driver::CaptureContinuityFailure::position_overlap)) return 20;
 
+    auto combined = clean;
+    combined.discontinuity_packets = 1;
+    combined.silent_packets = 1;
+    combined.position_gap_packets = 1;
+    combined.position_gap_frames = 480;
+    const auto combinedFailures = sar_driver::CaptureContinuityFailures(
+        combined, 96000, 96000, 96000);
+    if (!sar_driver::HasCaptureContinuityFailure(
+            combinedFailures, sar_driver::CaptureContinuityFailure::discontinuity) ||
+        !sar_driver::HasCaptureContinuityFailure(
+            combinedFailures, sar_driver::CaptureContinuityFailure::silent_packet) ||
+        !sar_driver::HasCaptureContinuityFailure(
+            combinedFailures, sar_driver::CaptureContinuityFailure::position_gap) ||
+        sar_driver::HasCaptureContinuityFailure(
+            combinedFailures, sar_driver::CaptureContinuityFailure::position_overlap)) {
+        return 21;
+    }
+
     // QPC rate drift is diagnostic, but backward timestamps invalidate the
     // time evidence needed to prove a continuous measured span.
     auto clockDrift = clean;

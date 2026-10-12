@@ -74,6 +74,17 @@ bool warmup_silence_is_excluded_but_measured_silence_is_retained() {
            tracker.measured_frames() == 480;
 }
 
+bool warmup_discontinuity_is_excluded_but_boundary_discontinuity_is_retained() {
+    sar_driver::WasapiCaptureContinuityTracker tracker(48000, 480);
+    tracker.Observe(0, 1000000, 480, true, false, false);
+    if (tracker.stats().packets != 0 ||
+        tracker.stats().discontinuity_packets != 0) return false;
+    tracker.Observe(480, 1100000, 480, true, false, false);
+    return tracker.stats().packets == 1 &&
+           tracker.stats().discontinuity_packets == 1 &&
+           tracker.stats().position_gap_packets == 0;
+}
+
 bool measured_qpc_regression_is_retained_after_warmup() {
     sar_driver::WasapiCaptureContinuityTracker tracker(48000, 480);
     tracker.Observe(0, 1000000, 480, false, false, false);
@@ -93,6 +104,7 @@ int main() {
                    post_warmup_timestamp_errors_remain_visible_after_recovery() &&
                    invalid_sample_rate_fails_closed() &&
                    warmup_silence_is_excluded_but_measured_silence_is_retained() &&
+                   warmup_discontinuity_is_excluded_but_boundary_discontinuity_is_retained() &&
                    measured_qpc_regression_is_retained_after_warmup()
                ? 0
                : 1;

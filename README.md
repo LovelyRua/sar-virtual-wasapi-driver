@@ -645,3 +645,31 @@ discontinuity and one 384-frame (8 ms) position gap. Signal analysis, level,
 timestamp, silent-packet, and QPC checks passed in that run. The changing gap
 counts across repeated runs indicate intermittent VM/loopback timing behavior,
 not a stable SAR endpoint result.
+
+## MMCSS probe scheduling and VB-Cable A/B (2026-10-13)
+
+The WASAPI probe now registers its event-servicing thread with MMCSS `Pro Audio`
+and falls back to `Audio`. Registration is scoped and reverted when the probe
+exits; failure is reported and does not relax the continuity gate. The Windows
+CI run passed 11/11 CTest cases, 5 endpoint-inventory cases, and 17 interactive
+launcher cases. The launcher can now forward the probe's optional maximum
+level-spread threshold (default remains disabled).
+
+On VM24, the same logged-in desktop and VB-Cable `CABLE Input` -> `CABLE
+Output` path were tested with the previous CI probe (without MMCSS) and the
+new CI probe. The no-MMCSS 60-second run failed continuity with 19 measured
+discontinuities and 14 position-gap packets / 14,016 gap frames. With MMCSS,
+two 60-second runs reported zero measured discontinuities and zero position
+gaps; one also passed a 1 dB level-spread limit with 59 valid windows, 0.151 dB
+left / 0.267 dB right spread, and zero silent frames. A separate MMCSS run
+without a level limit observed 2.557 dB right-channel spread despite passing
+continuity, which is why the explicit level gate matters. A 15-second MMCSS
+run also had zero continuity failures.
+
+This same-machine A/B is strong evidence that the probe's normal-priority event
+servicing contributed to the earlier VM loopback gaps. It is not proof of a
+SAR-driver fix: VM24 still has no SAR audio endpoint in this test, and more
+repeated, interleaved A/B runs are needed before treating the scheduling change
+as causal or the route as production-stable. The complete logs remain on VM24
+under `C:\sar-lab\mmcss-20261013-01`; temporary executables, scripts, and the
+interactive scheduled task were removed after testing.

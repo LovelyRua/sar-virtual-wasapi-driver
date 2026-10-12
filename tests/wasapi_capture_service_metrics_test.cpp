@@ -100,5 +100,17 @@ int main() {
     if (!sar_driver::HasCaptureContinuityFailure(
             sar_driver::CaptureContinuityFailures(regressedCapture, 48000, 48000, 48000),
             sar_driver::CaptureContinuityFailure::qpc_regression)) return 11;
+
+    sar_driver::WasapiCaptureServiceMetrics delayed;
+    delayed.BeginPass();
+    delayed.ObservePacket(1000, 2501, 1000);
+    delayed.ObservePacket(1500, 2501, 1000);
+    delayed.EndPass();
+    if (delayed.stats().packets_over_late_threshold != 2 ||
+        delayed.stats().maximum_packets_per_pass != 2 ||
+        delayed.stats().maximum_timestamp_age_100ns != 1501 ||
+        !sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
+        return 12;
+    }
     return 0;
 }

@@ -226,6 +226,17 @@ bool test_level_spread_suffix_works_for_legacy_and_multi_modes() {
            options.pair_count == 2 && options.maximum_level_spread_db == 12.0;
 }
 
+bool test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() {
+    const std::array<const wchar_t*, 9> trailing{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"1.0", L"extra"}};
+    sar_driver::WasapiProbeOptions options;
+    options.pair_count = 1;
+    options.maximum_level_spread_db = 3.0;
+    if (parse(trailing.data(), static_cast<int>(trailing.size()), options)) return false;
+    return options.pair_count == 0 && options.maximum_level_spread_db == 0.0 &&
+           options.endpoint_ids[0] == nullptr;
+}
+
 }  // namespace
 
 int main() {
@@ -252,6 +263,7 @@ int main() {
                    test_null_mode_argument_is_rejected_and_clears_error_state() &&
                    test_level_spread_limit_is_optional_and_bounded() &&
                    test_level_spread_suffix_works_for_legacy_and_multi_modes() &&
+                   test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() &&
                    test_null_argument_array_is_rejected()
                ? 0
                : 1;

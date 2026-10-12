@@ -128,6 +128,15 @@ bool test_discontinuity_is_not_hidden_by_contiguous_followup_packets() {
            stats.position_overlap_packets == 0 && stats.packets == 3;
 }
 
+bool test_discontinuity_flag_is_independent_of_position_gap() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(0, 1000000, 480, 48000, false, false, false);
+    timeline.Observe(480, 1100000, 480, 48000, true, false, false);
+    const auto& stats = timeline.stats();
+    return stats.discontinuity_packets == 1 && stats.position_gap_packets == 0 &&
+           stats.position_overlap_packets == 0 && stats.packets == 2;
+}
+
 bool test_silent_packets_are_counted_independently_of_discontinuities() {
     WasapiCaptureTimeline timeline;
     timeline.Observe(0, 0, 480, 48000, false, false, false);
@@ -151,6 +160,7 @@ int main() {
                    test_qpc_delta_error_tracks_clock_drift_without_frame_gap() &&
                    test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range() &&
                    test_discontinuity_is_not_hidden_by_contiguous_followup_packets() &&
+                   test_discontinuity_flag_is_independent_of_position_gap() &&
                    test_silent_packets_are_counted_independently_of_discontinuities() &&
                    test_maximum_gap_reports_the_largest_single_event()
                ? 0

@@ -295,8 +295,11 @@ void TestLevelMonitorTracksCrossWindowSpread() {
            "valid windows must contribute to the level summary");
     Expect(monitor.WithinSpread(3.1), "a 3 dB power spread must pass a 3.1 dB limit");
     Expect(!monitor.WithinSpread(2.9), "level threshold must reject an undersized limit");
-    Expect(std::abs(monitor.stats().spread_db(0) - 10.0 * std::log10(2.0)) < 1e-9,
+    const double spread = monitor.stats().spread_db(0);
+    Expect(std::abs(spread - 10.0 * std::log10(2.0)) < 1e-9,
            "level spread must be expressed as a power ratio in dB");
+    Expect(monitor.WithinSpread(spread),
+           "a threshold exactly equal to the measured spread must pass");
     Expect(std::abs(monitor.stats().minimum_dbfs(1) - 10.0 * std::log10(0.02)) < 1e-9,
            "minimum level must be reported relative to full scale");
 }
