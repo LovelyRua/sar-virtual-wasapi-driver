@@ -12,6 +12,7 @@
 #include "src/wasapi_capture_service_metrics.h"
 #include "src/wasapi_capture_continuity_tracker.h"
 #include "src/wasapi_capture_continuity_gate.h"
+#include "src/mmcss_audio_thread.h"
 #include "src/signal_level_monitor.h"
 #include "src/wasapi_probe_options.h"
 
@@ -565,6 +566,7 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
         throw std::runtime_error("Prepare WASAPI event buffer failed: " +
                                  std::to_string(GetLastError()));
     }
+    const sar_driver::ScopedMmcssAudioThread audioThread;
     try {
         for (auto& stream : streams) {
             stream.SetMaximumLevelSpread(options.maximum_level_spread_db);
@@ -613,6 +615,12 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
     }
     const bool passed = contentPassed && continuityPassed && levelPassed;
     std::cout << "multi_bus_probe passed=" << static_cast<int>(passed)
+              << " mmcss_registered=" << static_cast<int>(audioThread.registered())
+              << " mmcss_task="
+              << (audioThread.task_name() == nullptr ? "none" :
+                  (std::wcscmp(audioThread.task_name(), L"Pro Audio") == 0
+                       ? "Pro Audio" : "Audio"))
+              << " mmcss_error=" << audioThread.last_error()
               << " content_passed=" << static_cast<int>(contentPassed)
               << " continuity_passed=" << static_cast<int>(continuityPassed)
               << " level_limit_db=" << options.maximum_level_spread_db
