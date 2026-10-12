@@ -9,10 +9,14 @@ param(
     [string[]] $AdditionalRenderIds = @(),
     [string[]] $AdditionalCaptureIds = @(),
     [ValidateRange(5, 3600)] [int] $DurationSeconds = 15,
+    [ValidateRange(0, 60)] [double] $MaximumLevelSpreadDb = 0,
     [Parameter(Mandatory)] [string] $OutputPath
 )
 
 $ErrorActionPreference = 'Stop'
+if ($MaximumLevelSpreadDb -gt 0 -and $MaximumLevelSpreadDb -lt 0.1) {
+    throw 'MaximumLevelSpreadDb must be zero or between 0.1 and 60 dB.'
+}
 if (-not (Test-Path -LiteralPath $ProbePath -PathType Leaf)) {
     throw "Probe not found: $ProbePath"
 }
@@ -63,15 +67,20 @@ if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue |
 $taskName = 'SARLab-InteractiveAudioProbe'
 $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
+$levelLimit = ''
+if ($MaximumLevelSpreadDb -gt 0) {
+    $levelValue = $MaximumLevelSpreadDb.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+    $levelLimit = " --max-level-spread-db $levelValue"
+}
 if ($Mode -eq 'single_bus') {
-    $command = "& '$probeLiteral' --single $BusIndex '$RenderId' '$CaptureId' $DurationSeconds *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' --single $BusIndex '$RenderId' '$CaptureId' $DurationSeconds$levelLimit *> '$outputLiteral'; "
 } elseif ($Mode -eq 'dual_bus') {
-    $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds$levelLimit *> '$outputLiteral'; "
 } elseif ($Mode -eq 'multi_bus') {
     $quotedIds = @($ids | ForEach-Object { "'$_'" }) -join ' '
-    $command = "& '$probeLiteral' --multi $DurationSeconds $quotedIds *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' --multi $DurationSeconds $quotedIds$levelLimit *> '$outputLiteral'; "
 } else {
-    $command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId' *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId'$levelLimit *> '$outputLiteral'; "
 }
 $command +=
            "'PROBE_EXIT=' + `$LASTEXITCODE | Add-Content -LiteralPath '$outputLiteral'"

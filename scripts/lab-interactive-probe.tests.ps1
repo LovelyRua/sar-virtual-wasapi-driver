@@ -86,6 +86,19 @@ try {
     $tooMany.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4, $validCapture)
     Assert-Rejected $tooMany 'Multi-bus mode requires two to four endpoint pairs.'
 
+    $tooSmallLevelLimit = $base.Clone()
+    $tooSmallLevelLimit.MaximumLevelSpreadDb = 0.09
+    Assert-Rejected $tooSmallLevelLimit 'MaximumLevelSpreadDb must be zero or between 0.1 and 60 dB.'
+
+    $tooLargeLevelLimit = $base.Clone()
+    $tooLargeLevelLimit.MaximumLevelSpreadDb = 60.1
+    try {
+        & $scriptPath @tooLargeLevelLimit | Out-Null
+        throw 'Expected MaximumLevelSpreadDb validation failure.'
+    } catch {
+        if ($_.Exception.Message -notmatch 'MaximumLevelSpreadDb') { throw }
+    }
+
     $badFourthEndpoint = $base.Clone()
     $badFourthEndpoint.Mode = 'multi_bus'
     $badFourthEndpoint.AdditionalRenderIds = @($validRender2, $validRender3, 'bad-endpoint')
@@ -112,6 +125,15 @@ try {
         throw "Four-bus launcher generated an unexpected command: $command"
     }
 
+    $multiWithLevelLimit = $multi.Clone()
+    $multiWithLevelLimit.MaximumLevelSpreadDb = 6.5
+    & $scriptPath @multiWithLevelLimit | Out-Null
+    $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+    $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+    if (-not $command.Contains("$expectedMultiArguments --max-level-spread-db 6.5")) {
+        throw "Multi-bus launcher did not forward the level-spread limit: $command"
+    }
+
     $single = $base.Clone()
     $single.Mode = 'single_bus'
     $single.BusIndex = 2
@@ -121,6 +143,15 @@ try {
     $expectedSingleArguments = "--single 2 '$validRender' '$validCapture' 15"
     if (-not $command.Contains($expectedSingleArguments)) {
         throw "Single-bus launcher generated an unexpected command: $command"
+    }
+
+    $singleWithLevelLimit = $single.Clone()
+    $singleWithLevelLimit.MaximumLevelSpreadDb = 1.0
+    & $scriptPath @singleWithLevelLimit | Out-Null
+    $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+    $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+    if (-not $command.Contains("$expectedSingleArguments --max-level-spread-db 1")) {
+        throw "Single-bus launcher did not forward the level-spread limit: $command"
     }
 
     foreach ($boundaryBus in 0, 3) {
@@ -151,7 +182,7 @@ try {
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=14'
+    Write-Output 'lab_interactive_probe_tests passed=17'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
