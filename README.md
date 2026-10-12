@@ -638,3 +638,10 @@ results, not SAR-driver validation; investigate this baseline/timing behavior
 before treating a VM24 loopback run as a clean continuity acceptance test. The
 manually dispatched driver artifact contains unsigned SysVAD lab build evidence
 and is not an installable SAR release package.
+
+After adding reason output, another 15-second VM24 run reported
+`continuity_failure_reasons=discontinuity,position_gap`: one measured
+discontinuity and one 384-frame (8 ms) position gap. Signal analysis, level,
+timestamp, silent-packet, and QPC checks passed in that run. The changing gap
+counts across repeated runs indicate intermittent VM/loopback timing behavior,
+not a stable SAR endpoint result.
