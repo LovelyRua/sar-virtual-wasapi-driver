@@ -1,4 +1,5 @@
 #include "src/wasapi_capture_continuity_tracker.h"
+#include "src/wasapi_capture_continuity_gate.h"
 
 namespace {
 
@@ -35,10 +36,14 @@ bool only_post_warmup_position_errors_fail_measured_span() {
     tracker.Observe(1000, 1000000, 64, false, false, false);
     tracker.Observe(1064, 1013333, 480, false, false, false);
     tracker.Observe(1700, 1113333, 480, false, false, false);
+    const auto failures = sar_driver::CaptureContinuityFailures(
+        tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 960);
     return tracker.stats().position_gap_packets == 1 &&
            tracker.stats().position_gap_frames == 156 &&
            tracker.stats().maximum_position_gap_frames == 156 &&
-           tracker.measured_frames() == 960;
+           tracker.measured_frames() == 960 &&
+           sar_driver::HasCaptureContinuityFailure(
+               failures, sar_driver::CaptureContinuityFailure::position_gap);
 }
 
 bool post_warmup_timestamp_errors_remain_visible_after_recovery() {

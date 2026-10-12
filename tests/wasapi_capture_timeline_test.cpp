@@ -1,4 +1,5 @@
 #include "src/wasapi_capture_timeline.h"
+#include "src/wasapi_capture_continuity_gate.h"
 
 #include <cstdint>
 #include <limits>
@@ -28,6 +29,18 @@ bool test_gap_and_overlap_are_measured_in_frames() {
            stats.position_overlap_packets == 1 && stats.position_overlap_frames == 14 &&
            stats.maximum_position_overlap_frames == 14 &&
            stats.discontinuity_packets == 1 && stats.silent_packets == 1;
+}
+
+bool test_timeline_gap_maps_to_a_specific_gate_reason() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(0, 0, 480, 48000, false, false, false);
+    timeline.Observe(960, 200000, 480, 48000, false, false, false);
+    const auto failures = sar_driver::CaptureContinuityFailures(
+        timeline.stats(), 960, 960, 960);
+    return sar_driver::HasCaptureContinuityFailure(
+               failures, sar_driver::CaptureContinuityFailure::position_gap) &&
+           !sar_driver::HasCaptureContinuityFailure(
+               failures, sar_driver::CaptureContinuityFailure::position_overlap);
 }
 
 bool test_timestamp_error_breaks_position_comparison_chain() {
@@ -130,6 +143,7 @@ bool test_silent_packets_are_counted_independently_of_discontinuities() {
 int main() {
     return test_contiguous_packets_have_no_frame_gaps() &&
                    test_gap_and_overlap_are_measured_in_frames() &&
+                   test_timeline_gap_maps_to_a_specific_gate_reason() &&
                    test_timestamp_error_breaks_position_comparison_chain() &&
                    test_qpc_regression_and_zero_rate_do_not_overflow() &&
                    test_extreme_positions_saturate_without_wrapping() &&

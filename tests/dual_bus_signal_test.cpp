@@ -258,18 +258,30 @@ void TestSpectralAnalysisDoesNotProveTimelineContinuity() {
     sar_driver::CaptureTimelineStats timeline{};
     timeline.position_gap_packets = 1;
     timeline.position_gap_frames = droppedFrames;
-    Expect(!sar_driver::CaptureContinuityPassed(
-               timeline, kProbeRate, kProbeRate, kProbeRate),
+    const auto gapFailures = sar_driver::CaptureContinuityFailures(
+        timeline, kProbeRate, kProbeRate, kProbeRate);
+    Expect(!sar_driver::CaptureContinuityPassed(timeline, kProbeRate, kProbeRate,
+                                                kProbeRate) &&
+               sar_driver::HasCaptureContinuityFailure(
+                   gapFailures, sar_driver::CaptureContinuityFailure::position_gap),
            "a measured device-position gap must fail strict continuity despite valid tones");
     timeline = {};
     timeline.silent_packets = 1;
-    Expect(!sar_driver::CaptureContinuityPassed(
-               timeline, kProbeRate, kProbeRate, kProbeRate),
+    const auto silentFailures = sar_driver::CaptureContinuityFailures(
+        timeline, kProbeRate, kProbeRate, kProbeRate);
+    Expect(!sar_driver::CaptureContinuityPassed(timeline, kProbeRate, kProbeRate,
+                                                kProbeRate) &&
+               sar_driver::HasCaptureContinuityFailure(
+                   silentFailures, sar_driver::CaptureContinuityFailure::silent_packet),
            "a measured silent packet must fail strict continuity even if the full-window spectrum passes");
     timeline = {};
     timeline.qpc_regressions = 1;
-    Expect(!sar_driver::CaptureContinuityPassed(
-               timeline, kProbeRate, kProbeRate, kProbeRate),
+    const auto qpcFailures = sar_driver::CaptureContinuityFailures(
+        timeline, kProbeRate, kProbeRate, kProbeRate);
+    Expect(!sar_driver::CaptureContinuityPassed(timeline, kProbeRate, kProbeRate,
+                                                kProbeRate) &&
+               sar_driver::HasCaptureContinuityFailure(
+                   qpcFailures, sar_driver::CaptureContinuityFailure::qpc_regression),
            "a QPC regression must fail strict continuity even if the full-window spectrum passes");
 }
 

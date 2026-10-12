@@ -619,4 +619,22 @@ clock-rate delta error remains diagnostic, but backward time is not valid
 continuity evidence. Capture-service latency remains diagnostic and cannot
 override these content/timeline failures. Regression coverage was added across
 the timeline, warmup tracker, continuity gate, service metrics, and dual-bus
-signal test modules. CI validation for this follow-up is pending.
+signal test modules. The preceding gate change passed CI on 2026-10-12: 10/10
+CTest cases, 5 endpoint inventory parser tests, 14 interactive-probe argument
+tests, and the pinned SysVAD driver build. This follow-up adds explicit
+continuity failure reason flags and per-bus probe output without changing the
+strict pass criteria; validation is pending.
+
+The VM24 Windows 11 lab currently has VB-Audio Virtual Cable but no SAR audio
+endpoints. The CI dual-bus probe was run against CABLE Input -> CABLE Output in
+the logged-in desktop session. Both a 15-second and a 60-second baseline
+produced signal with no silent capture packets, timestamp errors, QPC
+regressions, clipping, or non-finite samples, but both failed the strict
+continuity gate: the 15-second run measured 5 position-gap packets / 3,360
+frames; the 60-second run measured 30 / 62,880 frames (largest gap 20,544
+frames). The 60-second content check had 57 valid windows, below its required
+58; its configured level-spread check itself passed. These are VB-Cable lab
+results, not SAR-driver validation; investigate this baseline/timing behavior
+before treating a VM24 loopback run as a clean continuity acceptance test. The
+manually dispatched driver artifact contains unsigned SysVAD lab build evidence
+and is not an installable SAR release package.

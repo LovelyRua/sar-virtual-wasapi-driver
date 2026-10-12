@@ -45,6 +45,31 @@ void Check(HRESULT result, const char* operation) {
     }
 }
 
+void WriteContinuityFailureReasons(
+    std::ostream& output, sar_driver::CaptureContinuityFailure failures) {
+    if (failures == sar_driver::CaptureContinuityFailure::none) {
+        output << "none";
+        return;
+    }
+    bool first = true;
+    const auto append = [&](const char* name, sar_driver::CaptureContinuityFailure failure) {
+        if (!sar_driver::HasCaptureContinuityFailure(failures, failure)) return;
+        if (!first) output << ',';
+        output << name;
+        first = false;
+    };
+    append("discontinuity", sar_driver::CaptureContinuityFailure::discontinuity);
+    append("silent_packet", sar_driver::CaptureContinuityFailure::silent_packet);
+    append("timestamp_error", sar_driver::CaptureContinuityFailure::timestamp_error);
+    append("qpc_regression", sar_driver::CaptureContinuityFailure::qpc_regression);
+    append("position_gap", sar_driver::CaptureContinuityFailure::position_gap);
+    append("position_overlap", sar_driver::CaptureContinuityFailure::position_overlap);
+    append("insufficient_capture_frames",
+           sar_driver::CaptureContinuityFailure::insufficient_capture_frames);
+    append("insufficient_render_frames",
+           sar_driver::CaptureContinuityFailure::insufficient_render_frames);
+}
+
 WAVEFORMATEXTENSIBLE RenderFormat() {
     WAVEFORMATEXTENSIBLE format{};
     format.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
@@ -391,9 +416,12 @@ public:
             sar_driver::kProbeRate * (seconds - 2));
     }
 
-    void Summary() const {
+    void Summary(unsigned seconds) const {
         const auto& timeline = timeline_.stats();
         const auto& service = service_metrics_.stats();
+        const auto continuityFailures = sar_driver::CaptureContinuityFailures(
+            continuity_tracker_.stats(), continuity_tracker_.measured_frames(), sentFrames_,
+            sar_driver::kProbeRate * (seconds - 2));
         const auto meanPacketAge = service.packets_with_valid_timestamp == 0 ? 0 :
             service.total_timestamp_age_100ns / service.packets_with_valid_timestamp;
         const auto& levels = level_monitor_.stats();
@@ -460,7 +488,10 @@ public:
                   << " analysis_signal_failures="
                   << analysis_signal_failures_.load(std::memory_order_relaxed)
                   << " analysis_wait_failures="
-                  << analysis_wait_failures_.load(std::memory_order_relaxed) << '\n';
+                  << analysis_wait_failures_.load(std::memory_order_relaxed)
+                  << " continuity_failure_reasons=";
+        WriteContinuityFailureReasons(std::cout, continuityFailures);
+        std::cout << '\n';
     }
 
 private:
@@ -571,7 +602,7 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
         for (auto& stream : streams) stream.StopAnalyzer();
         throw;
     }
-    for (const auto& stream : streams) stream.Summary();
+    for (const auto& stream : streams) stream.Summary(seconds);
     bool contentPassed = true;
     bool continuityPassed = true;
     bool levelPassed = true;
