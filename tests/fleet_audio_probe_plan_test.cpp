@@ -38,14 +38,14 @@ InstanceReadiness instance(unsigned number) {
     result.state = sar::devices::ReadinessState::ready;
     result.stable_samples = sar::devices::kStableReadinessSamples;
     result.endpoints = {
-        endpoint(id, L"Speakers (" + label + L")",
-                 L"render-speaker-" + suffix, EndpointFlow::render),
-        endpoint(id, L"Headphones (" + label + L")",
-                 L"render-headphone-" + suffix, EndpointFlow::render),
-        endpoint(id, L"SAR Experimental Capture 1 (" + label + L")",
-                 L"capture-1-" + suffix, EndpointFlow::capture),
-        endpoint(id, L"SAR Experimental Capture 2 (" + label + L")",
-                 L"capture-2-" + suffix, EndpointFlow::capture),
+        endpoint(id, std::wstring(L"Speakers (") + label + L")",
+                 std::wstring(L"render-speaker-") + suffix, EndpointFlow::render),
+        endpoint(id, std::wstring(L"Headphones (") + label + L")",
+                 std::wstring(L"render-headphone-") + suffix, EndpointFlow::render),
+        endpoint(id, std::wstring(L"SAR Experimental Capture 1 (") + label + L")",
+                 std::wstring(L"capture-1-") + suffix, EndpointFlow::capture),
+        endpoint(id, std::wstring(L"SAR Experimental Capture 2 (") + label + L")",
+                 std::wstring(L"capture-2-") + suffix, EndpointFlow::capture),
     };
     return result;
 }
