@@ -88,27 +88,55 @@ bool set_pairs(const wchar_t* const* ids, std::size_t pair_count,
     return true;
 }
 
-bool strip_level_limit(int& argc, const wchar_t* const* argv,
-                       WasapiProbeOptions& options, std::wstring& error) {
-    if (argc < 2 || argv[argc - 2] == nullptr ||
-        std::wcscmp(argv[argc - 2], L"--max-level-spread-db") != 0) {
-        return true;
-    }
-    const wchar_t* text = argv[argc - 1];
-    if (text == nullptr || *text == L'\0') {
-        error = L"Level spread limit must be a number from 0.1 to 60 dB.";
-        return false;
-    }
+bool parse_level_limit(const wchar_t* text, double& value) {
+    if (text == nullptr || *text == L'\0') return false;
     wchar_t* end = nullptr;
     errno = 0;
-    const double value = std::wcstod(text, &end);
-    if (errno != 0 || end == text || *end != L'\0' || !std::isfinite(value) ||
-        value < 0.1 || value > 60.0) {
-        error = L"Level spread limit must be a number from 0.1 to 60 dB.";
-        return false;
+    value = std::wcstod(text, &end);
+    return errno == 0 && end != text && *end == L'\0' && std::isfinite(value) &&
+           value >= 0.1 && value <= 60.0;
+}
+
+bool strip_optional_arguments(int& argc, const wchar_t* const* argv,
+                              WasapiProbeOptions& options,
+                              std::wstring& error) {
+    bool saw_level_limit = false;
+    bool saw_mmcss_toggle = false;
+    while (argc > 1) {
+        const wchar_t* tail = argv[argc - 1];
+        if (tail == nullptr) break;
+        if (std::wcscmp(tail, L"--no-mmcss") == 0) {
+            if (saw_mmcss_toggle) {
+                error = L"--no-mmcss may only be specified once.";
+                return false;
+            }
+            saw_mmcss_toggle = true;
+            options.enable_mmcss = false;
+            --argc;
+            continue;
+        }
+        if (std::wcscmp(tail, L"--max-level-spread-db") == 0) {
+            error = L"Level spread limit must be a number from 0.1 to 60 dB.";
+            return false;
+        }
+        if (argc > 2 && argv[argc - 2] != nullptr &&
+            std::wcscmp(argv[argc - 2], L"--max-level-spread-db") == 0) {
+            if (saw_level_limit) {
+                error = L"--max-level-spread-db may only be specified once.";
+                return false;
+            }
+            double value = 0.0;
+            if (!parse_level_limit(tail, value)) {
+                error = L"Level spread limit must be a number from 0.1 to 60 dB.";
+                return false;
+            }
+            saw_level_limit = true;
+            options.maximum_level_spread_db = value;
+            argc -= 2;
+            continue;
+        }
+        break;
     }
-    options.maximum_level_spread_db = value;
-    argc -= 2;
     return true;
 }
 
@@ -124,7 +152,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
         return false;
     }
     WasapiProbeOptions candidate;
-    if (!strip_level_limit(argc, argv, candidate, error)) return false;
+    if (!strip_optional_arguments(argc, argv, candidate, error)) return false;
     if (argc < 2) {
         error = L"Missing probe arguments.";
         return false;

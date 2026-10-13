@@ -11,9 +11,11 @@ public:
     using RevertFunction = decltype(&AvRevertMmThreadCharacteristics);
 
     explicit ScopedMmcssAudioThread(
+        bool enabled = true,
         RegisterFunction register_thread = &AvSetMmThreadCharacteristicsW,
         RevertFunction revert_thread = &AvRevertMmThreadCharacteristics) noexcept
         : revert_thread_(revert_thread) {
+        if (!enabled) return;
         if (register_thread == nullptr || revert_thread_ == nullptr) {
             last_error_ = ERROR_INVALID_FUNCTION;
             return;

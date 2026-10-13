@@ -237,6 +237,48 @@ bool test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() {
            options.endpoint_ids[0] == nullptr;
 }
 
+bool test_mmcss_is_enabled_by_default_and_can_be_disabled() {
+    const std::array<const wchar_t*, 6> defaults{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15"}};
+    const std::array<const wchar_t*, 7> disabled{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--no-mmcss"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(defaults.data(), static_cast<int>(defaults.size()), options) &&
+           options.enable_mmcss &&
+           parse(disabled.data(), static_cast<int>(disabled.size()), options) &&
+           !options.enable_mmcss && options.pair_count == 1;
+}
+
+bool test_mmcss_and_level_suffixes_are_order_independent() {
+    const std::array<const wchar_t*, 9> mmcss_then_level{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--no-mmcss",
+        L"--max-level-spread-db", L"1.25"}};
+    const std::array<const wchar_t*, 9> level_then_mmcss{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"1.25",
+        L"--no-mmcss"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(mmcss_then_level.data(), static_cast<int>(mmcss_then_level.size()), options) &&
+           !options.enable_mmcss && options.maximum_level_spread_db == 1.25 &&
+           parse(level_then_mmcss.data(), static_cast<int>(level_then_mmcss.size()), options) &&
+           !options.enable_mmcss && options.maximum_level_spread_db == 1.25;
+}
+
+bool test_duplicate_or_malformed_optional_arguments_fail_closed() {
+    const std::array<const wchar_t*, 8> duplicate_mmcss{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--no-mmcss", L"--no-mmcss"}};
+    const std::array<const wchar_t*, 7> missing_level{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db"}};
+    const std::array<const wchar_t*, 10> duplicate_level{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"1",
+        L"--max-level-spread-db", L"2"}};
+    sar_driver::WasapiProbeOptions options;
+    options.pair_count = 4;
+    return !parse(duplicate_mmcss.data(), static_cast<int>(duplicate_mmcss.size()), options) &&
+           options.pair_count == 0 && options.enable_mmcss &&
+           !parse(missing_level.data(), static_cast<int>(missing_level.size()), options) &&
+           !parse(duplicate_level.data(), static_cast<int>(duplicate_level.size()), options);
+}
+
 }  // namespace
 
 int main() {
@@ -264,6 +306,9 @@ int main() {
                    test_level_spread_limit_is_optional_and_bounded() &&
                    test_level_spread_suffix_works_for_legacy_and_multi_modes() &&
                    test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() &&
+                   test_mmcss_is_enabled_by_default_and_can_be_disabled() &&
+                   test_mmcss_and_level_suffixes_are_order_independent() &&
+                   test_duplicate_or_malformed_optional_arguments_fail_closed() &&
                    test_null_argument_array_is_rejected()
                ? 0
                : 1;

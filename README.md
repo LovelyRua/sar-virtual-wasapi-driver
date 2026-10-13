@@ -151,6 +151,11 @@ append `--max-level-spread-db <0.1..60>` after the normal arguments; for
 example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. A run can therefore pass signal
 content while failing continuity, level stability, or both. The optional level
 limit defaults to disabled and does not relax the zero-discontinuity gate.
+For a scheduling control run, append `--no-mmcss` to disable MMCSS only for this
+diagnostic probe. MMCSS remains enabled by default; the output distinguishes
+`mmcss_requested` from `mmcss_registered`, and disabling it never changes any
+content, level, or continuity acceptance threshold. Do not use this switch as a
+product or driver configuration setting.
 
 The multi-bus probe can also run inside the already logged-on desktop session
 through the interactive launcher. It reports packet cadence, discontinuities,
@@ -159,12 +164,13 @@ silence, peak level, clipping, and non-finite sample counts for each bus:
 ```powershell
 scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode dual_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -RenderId2 "<Bus 1 render ID>" -CaptureId2 "<Bus 1 capture ID>" -DurationSeconds 15 -OutputPath <report.txt>
 scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode multi_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -AdditionalRenderIds @("<Bus 1 render ID>", "<Bus 2 render ID>", "<Bus 3 render ID>") -AdditionalCaptureIds @("<Bus 1 capture ID>", "<Bus 2 capture ID>", "<Bus 3 capture ID>") -DurationSeconds 15 -OutputPath <report.txt>
+scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode single_bus -RenderId "<render ID>" -CaptureId "<capture ID>" -DurationSeconds 60 -MaximumLevelSpreadDb 1 -DisableMmcss -OutputPath <control.txt>
 ```
 
 For a single isolated bus, use `-Mode single_bus -BusIndex 0` (indices 0..3).
 This launches the probe's `--single` mode in the logged-on desktop session and
 is useful for repeatable one-endpoint-pair controls without constructing a
-second virtual endpoint pair.
+second virtual endpoint pair. Omit `-DisableMmcss` for the treatment arm.
 
 The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request
 RAW capture; `--default` and `--route` use ordinary shared-mode capture without RAW.
@@ -646,7 +652,7 @@ timestamp, silent-packet, and QPC checks passed in that run. The changing gap
 counts across repeated runs indicate intermittent VM/loopback timing behavior,
 not a stable SAR endpoint result.
 
-## MMCSS probe scheduling and VB-Cable A/B (2026-10-13)
+## MMCSS probe scheduling and VB-Cable baseline (2026-10-13)
 
 The WASAPI probe now registers its event-servicing thread with MMCSS `Pro Audio`
 and falls back to `Audio`. Registration is scoped and reverted when the probe
@@ -666,10 +672,12 @@ without a level limit observed 2.557 dB right-channel spread despite passing
 continuity, which is why the explicit level gate matters. A 15-second MMCSS
 run also had zero continuity failures.
 
-This same-machine A/B is strong evidence that the probe's normal-priority event
-servicing contributed to the earlier VM loopback gaps. It is not proof of a
-SAR-driver fix: VM24 still has no SAR audio endpoint in this test, and more
-repeated, interleaved A/B runs are needed before treating the scheduling change
-as causal or the route as production-stable. The complete logs remain on VM24
+The historical comparison used binaries from different CI builds and is
+therefore preliminary, not a clean causal A/B. Keep executable, endpoint IDs,
+duration, desktop session, and level threshold identical between runs; use an
+interleaved order such as control/treatment/treatment/control and retain every
+report. It is not proof of a SAR-driver fix: VM24 still has no SAR audio endpoint
+in this test, and more repeated same-binary A/B runs are needed before treating
+the scheduling change as causal or the route as production-stable. The complete logs remain on VM24
 under `C:\sar-lab\mmcss-20261013-01`; temporary executables, scripts, and the
 interactive scheduled task were removed after testing.

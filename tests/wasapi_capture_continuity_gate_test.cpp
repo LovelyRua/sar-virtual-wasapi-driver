@@ -5,6 +5,10 @@
 int main() {
     sar_driver::CaptureTimelineStats clean{};
     if (!sar_driver::CaptureContinuityPassed(clean, 96000, 96000, 96000)) return 1;
+    // Both scheduling arms must judge the same measured stream identically.
+    const auto cleanArmA = sar_driver::CaptureContinuityFailures(clean, 96000, 96000, 96000);
+    const auto cleanArmB = sar_driver::CaptureContinuityFailures(clean, 96000, 96000, 96000);
+    if (cleanArmA != cleanArmB || cleanArmA != sar_driver::CaptureContinuityFailure::none) return 20;
     if (!sar_driver::CaptureContinuityPassed(clean, 96001, 96000, 96000)) return 2;
     if (sar_driver::CaptureContinuityPassed(clean, 95999, 96000, 96000)) return 3;
     if (sar_driver::CaptureContinuityPassed(clean, 96000, 95999, 96000)) return 4;
@@ -50,6 +54,9 @@ int main() {
     gap.position_gap_packets = 1;
     gap.position_gap_frames = 48;
     if (sar_driver::CaptureContinuityPassed(gap, 96000, 96000, 96000)) return 7;
+    const auto gapArmA = sar_driver::CaptureContinuityFailures(gap, 96000, 96000, 96000);
+    const auto gapArmB = sar_driver::CaptureContinuityFailures(gap, 96000, 96000, 96000);
+    if (gapArmA != gapArmB) return 21;
     if (!sar_driver::HasCaptureContinuityFailure(
             sar_driver::CaptureContinuityFailures(gap, 96000, 96000, 96000),
             sar_driver::CaptureContinuityFailure::position_gap)) return 19;

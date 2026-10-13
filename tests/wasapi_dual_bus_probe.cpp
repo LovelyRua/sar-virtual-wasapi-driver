@@ -566,7 +566,7 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
         throw std::runtime_error("Prepare WASAPI event buffer failed: " +
                                  std::to_string(GetLastError()));
     }
-    const sar_driver::ScopedMmcssAudioThread audioThread;
+    const sar_driver::ScopedMmcssAudioThread audioThread(options.enable_mmcss);
     try {
         for (auto& stream : streams) {
             stream.SetMaximumLevelSpread(options.maximum_level_spread_db);
@@ -615,6 +615,7 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
     }
     const bool passed = contentPassed && continuityPassed && levelPassed;
     std::cout << "multi_bus_probe passed=" << static_cast<int>(passed)
+              << " mmcss_requested=" << static_cast<int>(options.enable_mmcss)
               << " mmcss_registered=" << static_cast<int>(audioThread.registered())
               << " mmcss_task="
               << (audioThread.task_name() == nullptr ? "none" :
@@ -633,7 +634,7 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    std::array<const wchar_t*, 13> arguments{};
+    std::array<const wchar_t*, 14> arguments{};
     if (argc > static_cast<int>(arguments.size())) {
         std::wcerr << L"Probe accepts at most four endpoint pairs.\n";
         return 1;
@@ -650,7 +651,8 @@ int wmain(int argc, wchar_t** argv) {
                       L" <render> <capture> <seconds>\n"
                       L"   or: wasapi_dual_bus_probe --multi <seconds>"
                       L" <render1> <capture1> ... <render4> <capture4>\n"
-                      L"Optional suffix: --max-level-spread-db <0.1..60>\n"
+                      L"Optional suffixes: [--max-level-spread-db <0.1..60>] [--no-mmcss] (either order)\n"
+                      L"--no-mmcss disables MMCSS for this diagnostic probe only.\n"
                    << option_error << L'\n';
         return 1;
     }

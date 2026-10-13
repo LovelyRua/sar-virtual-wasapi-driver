@@ -90,6 +90,10 @@ try {
     $tooSmallLevelLimit.MaximumLevelSpreadDb = 0.09
     Assert-Rejected $tooSmallLevelLimit 'MaximumLevelSpreadDb must be zero or between 0.1 and 60 dB.'
 
+    $invalidMmcssMode = $base.Clone()
+    $invalidMmcssMode.DisableMmcss = $true
+    Assert-Rejected $invalidMmcssMode 'DisableMmcss is only valid for single_bus, dual_bus, and multi_bus probe modes.'
+
     $tooLargeLevelLimit = $base.Clone()
     $tooLargeLevelLimit.MaximumLevelSpreadDb = 60.1
     try {
@@ -134,6 +138,16 @@ try {
         throw "Multi-bus launcher did not forward the level-spread limit: $command"
     }
 
+    $multiWithoutMmcss = $multi.Clone()
+    $multiWithoutMmcss.DisableMmcss = $true
+    $multiWithoutMmcss.MaximumLevelSpreadDb = 1.0
+    & $scriptPath @multiWithoutMmcss | Out-Null
+    $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+    $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+    if (-not $command.Contains("$expectedMultiArguments --max-level-spread-db 1 --no-mmcss")) {
+        throw "Multi-bus launcher did not forward the diagnostic MMCSS control switch: $command"
+    }
+
     $single = $base.Clone()
     $single.Mode = 'single_bus'
     $single.BusIndex = 2
@@ -152,6 +166,15 @@ try {
     $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
     if (-not $command.Contains("$expectedSingleArguments --max-level-spread-db 1")) {
         throw "Single-bus launcher did not forward the level-spread limit: $command"
+    }
+
+    $singleWithoutMmcss = $single.Clone()
+    $singleWithoutMmcss.DisableMmcss = $true
+    & $scriptPath @singleWithoutMmcss | Out-Null
+    $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
+    $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+    if (-not $command.Contains("$expectedSingleArguments --no-mmcss")) {
+        throw "Single-bus launcher did not forward the diagnostic MMCSS control switch: $command"
     }
 
     foreach ($boundaryBus in 0, 3) {
@@ -182,7 +205,7 @@ try {
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=17'
+    Write-Output 'lab_interactive_probe_tests passed=20'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

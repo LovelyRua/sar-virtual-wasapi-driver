@@ -2,6 +2,7 @@
 #include "src/wasapi_capture_continuity_gate.h"
 
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 
 namespace {
@@ -41,6 +42,24 @@ bool test_timeline_gap_maps_to_a_specific_gate_reason() {
                failures, sar_driver::CaptureContinuityFailure::position_gap) &&
            !sar_driver::HasCaptureContinuityFailure(
                failures, sar_driver::CaptureContinuityFailure::position_overlap);
+}
+
+bool test_identical_ab_packets_produce_identical_timeline_evidence() {
+    WasapiCaptureTimeline armA;
+    WasapiCaptureTimeline armB;
+    for (auto* timeline : {&armA, &armB}) {
+        timeline->Observe(0, 1000000, 480, 48000, false, false, false);
+        timeline->Observe(480, 1100000, 480, 48000, false, false, false);
+        timeline->Observe(1008, 1210000, 480, 48000, false, false, false);
+    }
+    const auto& a = armA.stats();
+    const auto& b = armB.stats();
+    return a.packets == b.packets &&
+           a.position_gap_packets == b.position_gap_packets &&
+           a.position_gap_frames == b.position_gap_frames &&
+           a.position_overlap_packets == b.position_overlap_packets &&
+           a.discontinuity_packets == b.discontinuity_packets &&
+           a.maximum_qpc_delta_error_100ns == b.maximum_qpc_delta_error_100ns;
 }
 
 bool test_timestamp_error_breaks_position_comparison_chain() {
@@ -153,6 +172,7 @@ int main() {
     return test_contiguous_packets_have_no_frame_gaps() &&
                    test_gap_and_overlap_are_measured_in_frames() &&
                    test_timeline_gap_maps_to_a_specific_gate_reason() &&
+                   test_identical_ab_packets_produce_identical_timeline_evidence() &&
                    test_timestamp_error_breaks_position_comparison_chain() &&
                    test_qpc_regression_and_zero_rate_do_not_overflow() &&
                    test_extreme_positions_saturate_without_wrapping() &&
