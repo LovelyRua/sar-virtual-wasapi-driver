@@ -34,7 +34,8 @@ bool empty_break_is_free_and_does_not_shift_window_boundaries() {
         return false;
     }
     if (assembler.AppendFrame(1.0f, -1.0f, queue) ||
-        !assembler.AppendFrame(2.0f, -2.0f, queue) ||
+        assembler.AppendFrame(2.0f, -2.0f, queue) ||
+        !assembler.AppendFrame(3.0f, -3.0f, queue) ||
         assembler.pending_frames() != 0) return false;
     return assembler.completed_windows() == 1 && queue.queued_windows() == 1;
 }

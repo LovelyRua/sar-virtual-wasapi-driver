@@ -102,9 +102,8 @@ int main() {
     sar_driver::WasapiCaptureContinuityTracker tracker(4, 0);
     Queue queue;
     Assembler assembler;
-    const auto first = tracker.Observe(0, 1000000, 2, false, false, false);
-    if (first.segment_break || assembler.AppendFrame(1.0f, 1.0f, queue) ||
-        assembler.AppendFrame(1.0f, 1.0f, queue)) return 22;
+    const auto first = tracker.Observe(0, 1000000, 1, false, false, false);
+    if (first.segment_break || assembler.AppendFrame(1.0f, 1.0f, queue)) return 22;
     const auto gapPacket = tracker.Observe(5, 2000000, 2, false, false, false);
     if (!gapPacket.segment_break || !assembler.DiscardPartialSegment()) return 23;
     if (assembler.AppendFrame(2.0f, 2.0f, queue) ||
@@ -114,11 +113,11 @@ int main() {
             cleanNewSegment = count == 4 && samples[0] == 2.0f && samples[2] == 2.0f;
         }) || !cleanNewSegment) return 25;
     const auto segmentFailures = sar_driver::CaptureContinuityFailures(
-        tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 4);
+        tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 3);
     if (!sar_driver::HasCaptureContinuityFailure(
             segmentFailures, sar_driver::CaptureContinuityFailure::position_gap) ||
         sar_driver::CaptureContinuityPassed(
-            tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 4)) {
+            tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 3)) {
         return 26;
     }
     return 0;
