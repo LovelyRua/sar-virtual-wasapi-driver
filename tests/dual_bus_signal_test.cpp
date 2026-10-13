@@ -304,6 +304,30 @@ void TestLevelMonitorTracksCrossWindowSpread() {
            "minimum level must be reported relative to full scale");
 }
 
+void TestSingleChannelCaptureSagFailsLevelGate() {
+    const auto stableSamples = MakeWindow(0);
+    const auto stable = AnalyzeSignalWindow(stableSamples.data(), kProbeRate, 0);
+    auto saggedSamples = MakeWindow(0);
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        saggedSamples[frame * 2 + 1] *= 0.1f;
+    }
+    const auto sagged = AnalyzeSignalWindow(saggedSamples.data(), kProbeRate, 0);
+    Expect(stable.passed() && sagged.passed(),
+           "a low but present tone remains a valid content window");
+    Expect(sagged.expected_power[1] > 1e-5,
+           "the attenuated right channel remains above the content floor");
+
+    sar_driver::SignalLevelMonitor monitor;
+    monitor.Observe(stable.expected_power);
+    monitor.Observe(sagged.expected_power);
+    Expect(monitor.stats().valid_windows == 2 && monitor.stats().invalid_windows == 0,
+           "both stable and attenuated windows contribute to the level gate");
+    Expect(monitor.stats().spread_db(0) < 0.01,
+           "an isolated right-channel sag must not affect the left-channel range");
+    Expect(monitor.stats().spread_db(1) > 19.0 && !monitor.WithinSpread(1.0),
+           "a single-channel 20 dB capture sag must fail a 1 dB stability gate");
+}
+
 void TestInvalidLevelWindowDoesNotPoisonValidRange() {
     sar_driver::SignalLevelMonitor monitor;
     monitor.Observe({0.04, 0.04});
@@ -339,6 +363,7 @@ int main() {
     TestSignalThresholdBoundaries();
     TestSpectralAnalysisDoesNotProveTimelineContinuity();
     TestLevelMonitorTracksCrossWindowSpread();
+    TestSingleChannelCaptureSagFailsLevelGate();
     TestInvalidLevelWindowDoesNotPoisonValidRange();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);

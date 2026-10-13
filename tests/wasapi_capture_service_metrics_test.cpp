@@ -113,6 +113,21 @@ int main() {
         return 12;
     }
 
+    sar_driver::WasapiCaptureServiceMetrics sustainedLate;
+    for (std::uint64_t packet = 0; packet < 600; ++packet) {
+        const auto captureQpc = packet * 100000;
+        sustainedLate.BeginPass();
+        sustainedLate.ObservePacket(captureQpc, captureQpc + 2501, 1000);
+        sustainedLate.EndPass();
+    }
+    if (sustainedLate.stats().packets != 600 ||
+        sustainedLate.stats().packets_over_late_threshold != 600 ||
+        sustainedLate.stats().maximum_timestamp_age_100ns != 2501 ||
+        sustainedLate.stats().empty_service_passes != 0 ||
+        !sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
+        return 14;
+    }
+
     sar_driver::WasapiCaptureServiceMetrics unknownPeriod;
     unknownPeriod.BeginPass();
     unknownPeriod.ObservePacket(100, 1000100, 0);

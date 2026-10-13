@@ -48,6 +48,25 @@ bool only_post_warmup_position_errors_fail_measured_span() {
                failures, sar_driver::CaptureContinuityFailure::position_gap);
 }
 
+bool measured_384_frame_gap_after_warmup_is_retained() {
+    sar_driver::WasapiCaptureContinuityTracker tracker(48000, 480);
+    if (tracker.Observe(0, 1000000, 480, false, false, false).segment_break) {
+        return false;
+    }
+    if (tracker.Observe(480, 1100000, 480, false, false, false).segment_break) {
+        return false;
+    }
+    const auto gap = tracker.Observe(1344, 1280000, 480, false, false, false);
+    const auto failures = sar_driver::CaptureContinuityFailures(
+        tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 960);
+    return gap.segment_break && tracker.stats().position_gap_packets == 1 &&
+           tracker.stats().position_gap_frames == 384 &&
+           tracker.stats().maximum_position_gap_frames == 384 &&
+           tracker.measured_frames() == 960 &&
+           sar_driver::HasCaptureContinuityFailure(
+               failures, sar_driver::CaptureContinuityFailure::position_gap);
+}
+
 bool tracker_preserves_breaks_after_warmup_clipping() {
     sar_driver::WasapiCaptureContinuityTracker tracker(48000, 100);
     const auto warmup = tracker.Observe(0, 1000000, 100, true, false, false);
@@ -139,6 +158,7 @@ int main() {
     return startup_packets_are_excluded_from_measured_continuity() &&
                    packet_crossing_warmup_advances_position_and_qpc() &&
                    only_post_warmup_position_errors_fail_measured_span() &&
+                   measured_384_frame_gap_after_warmup_is_retained() &&
                    post_warmup_timestamp_errors_remain_visible_after_recovery() &&
                    invalid_sample_rate_fails_closed() &&
                    warmup_silence_is_excluded_but_measured_silence_is_retained() &&

@@ -747,3 +747,33 @@ right spread despite perfect timeline continuity. Therefore MMCSS must not be
 treated as a level-stability fix. Full reports are retained on VM24 in
 `C:\sar-lab\mmcss-ab-666063f`; the interactive scheduled task was removed after
 each run, and no driver or boot-security settings were changed.
+
+## Experimental two-bus install and repeat (2026-10-13)
+
+CI artifact `38370749217` was signature-checked and installed on VM24 as the
+experimental `ROOT\MEDIA\0001` instance. The endpoint manager reached stable
+readiness and exposed two render plus two capture endpoints at 48 kHz, stereo
+float. This verifies PnP installation and WASAPI enumeration, not a release
+driver or SAR engine/GUI integration.
+
+The 60-second dual-bus probe had content and timeline continuity pass on both
+buses: no silent frames, discontinuities, timestamp errors, device-position
+gaps, overlaps, or QPC regressions. The separate 1 dB level gate failed on bus
+0 right at 2.059 dB spread; bus 0 left was 0.009 dB and bus 1 was 0.00001 dB or
+less on both channels. A bus 1 single-bus repeat passed the same gate at 0.203
+dB left / 0.026 dB right. Bus 0 single-bus repeats were not consistent: one
+had 2.530 dB right-channel spread without a timeline gap, while another had a
+single 384-frame position gap and a 19.061 dB right-channel spread.
+
+The same 60-second probe against VB-Cable on VM24 had zero timeline failures,
+but also failed the 1 dB level gate at 8.861 dB right-channel spread. This
+control means the lab's virtualized WASAPI path is not currently a reliable
+level-stability reference. Do not attribute every bus 0 anomaly to the sample
+driver, and do not claim the driver passed a stability or soak test. Keep the
+strict gates and investigate the VM baseline before drawing a causal conclusion.
+
+The per-run logs remain under `C:\SARLab\38370749217` on VM24. After testing,
+the exact experimental device, its `oem12.inf` package, the temporary signing
+certificate in Local Machine `Root` and `TrustedPublisher`, and the interactive
+probe task were removed. Secure Boot remains disabled and test signing remains
+enabled as previously authorized for this dedicated lab VM.

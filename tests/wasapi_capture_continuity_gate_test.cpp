@@ -63,6 +63,19 @@ int main() {
     if (!sar_driver::HasCaptureContinuityFailure(
             sar_driver::CaptureContinuityFailures(gap, 96000, 96000, 96000),
             sar_driver::CaptureContinuityFailure::position_gap)) return 19;
+    auto vmSizedGap = clean;
+    vmSizedGap.position_gap_packets = 1;
+    vmSizedGap.position_gap_frames = 384;
+    vmSizedGap.maximum_position_gap_frames = 384;
+    const auto vmGapFailures = sar_driver::CaptureContinuityFailures(
+        vmSizedGap, 96000, 96000, 96000);
+    if (sar_driver::CaptureContinuityPassed(vmSizedGap, 96000, 96000, 96000) ||
+        !sar_driver::HasCaptureContinuityFailure(
+            vmGapFailures, sar_driver::CaptureContinuityFailure::position_gap) ||
+        sar_driver::HasCaptureContinuityFailure(
+            vmGapFailures, sar_driver::CaptureContinuityFailure::position_overlap)) {
+        return 27;
+    }
     auto overlap = clean;
     overlap.position_overlap_packets = 1;
     overlap.position_overlap_frames = 48;

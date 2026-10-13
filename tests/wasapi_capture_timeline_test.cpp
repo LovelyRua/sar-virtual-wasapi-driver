@@ -44,6 +44,18 @@ bool test_timeline_gap_maps_to_a_specific_gate_reason() {
                failures, sar_driver::CaptureContinuityFailure::position_overlap);
 }
 
+bool test_384_frame_gap_is_counted_exactly() {
+    WasapiCaptureTimeline timeline;
+    timeline.Observe(0, 1000000, 480, 48000, false, false, false);
+    const bool segmentBreak = timeline.Observe(
+        864, 1180000, 480, 48000, false, false, false);
+    const auto& stats = timeline.stats();
+    return segmentBreak && stats.position_gap_packets == 1 &&
+           stats.position_gap_frames == 384 &&
+           stats.maximum_position_gap_frames == 384 &&
+           stats.position_overlap_packets == 0;
+}
+
 bool test_identical_ab_packets_produce_identical_timeline_evidence() {
     WasapiCaptureTimeline armA;
     WasapiCaptureTimeline armB;
@@ -204,6 +216,7 @@ int main() {
     return test_contiguous_packets_have_no_frame_gaps() &&
                    test_gap_and_overlap_are_measured_in_frames() &&
                    test_timeline_gap_maps_to_a_specific_gate_reason() &&
+                   test_384_frame_gap_is_counted_exactly() &&
                    test_identical_ab_packets_produce_identical_timeline_evidence() &&
                    test_timestamp_error_breaks_position_comparison_chain() &&
                    test_qpc_regression_and_zero_rate_do_not_overflow() &&
