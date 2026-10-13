@@ -24,10 +24,11 @@ class WasapiCaptureTimeline {
 public:
     static constexpr std::uint64_t kQpcUnitsPerSecond = 10000000;
 
-    void Observe(std::uint64_t device_position, std::uint64_t qpc_position_100ns,
+    bool Observe(std::uint64_t device_position, std::uint64_t qpc_position_100ns,
                  std::uint32_t frames, std::uint32_t sample_rate,
                  bool discontinuity, bool silent, bool timestamp_error) {
         ++stats_.packets;
+        bool segment_break = discontinuity || silent || timestamp_error || sample_rate == 0;
         if (discontinuity) ++stats_.discontinuity_packets;
         if (silent) ++stats_.silent_packets;
         if (timestamp_error) ++stats_.timestamp_error_packets;
@@ -35,6 +36,7 @@ public:
         if (have_previous_ && !timestamp_error && sample_rate != 0) {
             const std::uint64_t expected = SaturatingAdd(previous_position_, previous_frames_);
             if (device_position > expected) {
+                segment_break = true;
                 ++stats_.position_gap_packets;
                 const auto gap = device_position - expected;
                 AddSaturated(stats_.position_gap_frames, gap);
@@ -42,6 +44,7 @@ public:
                     stats_.maximum_position_gap_frames = gap;
                 }
             } else if (device_position < expected) {
+                segment_break = true;
                 ++stats_.position_overlap_packets;
                 const auto overlap = expected - device_position;
                 AddSaturated(stats_.position_overlap_frames, overlap);
@@ -51,6 +54,7 @@ public:
             }
 
             if (qpc_position_100ns < previous_qpc_) {
+                segment_break = true;
                 ++stats_.qpc_regressions;
             } else if (device_position >= previous_position_) {
                 const std::uint64_t position_delta = device_position - previous_position_;
@@ -76,12 +80,13 @@ public:
         if (timestamp_error || sample_rate == 0 ||
             device_position > std::numeric_limits<std::uint64_t>::max() - frames) {
             have_previous_ = false;
-            return;
+            return true;
         }
         previous_position_ = device_position;
         previous_qpc_ = qpc_position_100ns;
         previous_frames_ = frames;
         have_previous_ = true;
+        return segment_break;
     }
 
     const CaptureTimelineStats& stats() const { return stats_; }

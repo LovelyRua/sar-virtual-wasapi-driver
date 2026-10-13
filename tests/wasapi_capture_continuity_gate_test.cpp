@@ -1,4 +1,7 @@
 #include "src/wasapi_capture_continuity_gate.h"
+#include "src/wasapi_capture_continuity_tracker.h"
+#include "src/capture_signal_window_assembler.h"
+#include "src/signal_window_queue.h"
 
 #include <cstdint>
 
@@ -91,5 +94,32 @@ int main() {
     auto clockDrift = clean;
     clockDrift.maximum_qpc_delta_error_100ns = 100000;
     if (!sar_driver::CaptureContinuityPassed(clockDrift, 96000, 96000, 96000)) return 9;
+
+    // Segmenting signal analysis prevents stitched windows but must never
+    // erase the independent strict timeline failure.
+    using Queue = sar_driver::SignalWindowQueue<2, 2, 2>;
+    using Assembler = sar_driver::CaptureSignalWindowAssembler<Queue>;
+    sar_driver::WasapiCaptureContinuityTracker tracker(4, 0);
+    Queue queue;
+    Assembler assembler;
+    const auto first = tracker.Observe(0, 1000000, 2, false, false, false);
+    if (first.segment_break || assembler.AppendFrame(1.0f, 1.0f, queue) ||
+        assembler.AppendFrame(1.0f, 1.0f, queue)) return 22;
+    const auto gapPacket = tracker.Observe(5, 2000000, 2, false, false, false);
+    if (!gapPacket.segment_break || !assembler.DiscardPartialSegment()) return 23;
+    if (assembler.AppendFrame(2.0f, 2.0f, queue) ||
+        !assembler.AppendFrame(2.0f, 2.0f, queue)) return 24;
+    bool cleanNewSegment = false;
+    if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+            cleanNewSegment = count == 4 && samples[0] == 2.0f && samples[2] == 2.0f;
+        }) || !cleanNewSegment) return 25;
+    const auto segmentFailures = sar_driver::CaptureContinuityFailures(
+        tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 4);
+    if (!sar_driver::HasCaptureContinuityFailure(
+            segmentFailures, sar_driver::CaptureContinuityFailure::position_gap) ||
+        sar_driver::CaptureContinuityPassed(
+            tracker.stats(), tracker.measured_frames(), tracker.measured_frames(), 4)) {
+        return 26;
+    }
     return 0;
 }

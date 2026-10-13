@@ -32,6 +32,17 @@ else()
 endif()
 add_test(NAME signal_window_queue_test COMMAND signal_window_queue_test)
 
+add_executable(capture_signal_window_assembler_test
+  tests/capture_signal_window_assembler_test.cpp)
+target_compile_features(capture_signal_window_assembler_test PRIVATE cxx_std_17)
+target_include_directories(capture_signal_window_assembler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(capture_signal_window_assembler_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(capture_signal_window_assembler_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME capture_signal_window_assembler_test COMMAND capture_signal_window_assembler_test)
+
 add_executable(wasapi_probe_options_test
   tests/wasapi_probe_options_test.cpp
   src/wasapi_probe_options.cpp

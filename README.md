@@ -151,6 +151,12 @@ append `--max-level-spread-db <0.1..60>` after the normal arguments; for
 example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. A run can therefore pass signal
 content while failing continuity, level stability, or both. The optional level
 limit defaults to disabled and does not relax the zero-discontinuity gate.
+When capture reports a discontinuity, silence, timestamp error, device-position
+gap/overlap, or QPC regression, the probe starts a fresh signal-analysis window
+and discards any incomplete frames from the previous segment. Per-bus summaries
+report segment-break count, discarded frames, and trailing partial frames. This
+keeps spectral and level measurements from combining samples across a known
+timeline break; it does not hide or forgive the corresponding continuity failure.
 For a scheduling control run, append `--no-mmcss` to disable MMCSS only for this
 diagnostic probe. MMCSS remains enabled by default; the output distinguishes
 `mmcss_requested` from `mmcss_registered`, and disabling it never changes any

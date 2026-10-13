@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include "src/dual_bus_signal.h"
+#include "src/capture_signal_window_assembler.h"
 #include "src/wasapi_event_pump.h"
 #include "src/signal_window_queue.h"
 #include "src/wasapi_capture_timeline.h"
@@ -122,6 +123,7 @@ class StreamPair {
 public:
     using AnalysisQueue = sar_driver::SignalWindowQueue<
         sar_driver::kProbeRate, sar_driver::kProbeChannels, 4>;
+    using WindowAssembler = sar_driver::CaptureSignalWindowAssembler<AnalysisQueue>;
 
     ~StreamPair() {
         Stop();
@@ -307,6 +309,10 @@ public:
                 devicePosition, qpcPosition, frames,
                 (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
                 silent, (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
+            if (continuityPacket.segment_break) {
+                ++analysis_segment_breaks_;
+                window_assembler_.DiscardPartialSegment();
+            }
             ++capturePackets_;
             if (frames > maximumPacketFrames_) maximumPacketFrames_ = frames;
             if (silent) ++silentPackets_;
@@ -331,17 +337,12 @@ public:
                     if (!std::isfinite(value)) value = 0.0f;
                     frame_samples[channel] = value;
                 }
-                pending_window_[pending_frames_ * 2] = frame_samples[0];
-                pending_window_[pending_frames_ * 2 + 1] = frame_samples[1];
-                if (++pending_frames_ == sar_driver::kProbeRate) {
-                    if (analysis_queue_.try_push(pending_window_.data(),
-                                                 pending_window_.size())) {
-                        if (!SetEvent(analysis_event_)) {
-                            analysis_signal_failures_.fetch_add(
-                                1, std::memory_order_relaxed);
-                        }
+                if (window_assembler_.AppendFrame(
+                        frame_samples[0], frame_samples[1], analysis_queue_)) {
+                    if (!SetEvent(analysis_event_)) {
+                        analysis_signal_failures_.fetch_add(
+                            1, std::memory_order_relaxed);
                     }
-                    pending_frames_ = 0;
                 }
             }
             capturedFrames_ += frames;
@@ -474,6 +475,14 @@ public:
                   << service.packets_with_future_timestamp
                   << " windows=" << windows_
                   << " failed_windows=" << failed_windows_
+                  << " analysis_segment_breaks=" << analysis_segment_breaks_
+                  << " discarded_segment_frames="
+                  << window_assembler_.discarded_segment_frames()
+                  << " trailing_partial_frames=" << window_assembler_.pending_frames()
+                  << " completed_analysis_windows="
+                  << window_assembler_.completed_windows()
+                  << " rejected_analysis_windows="
+                  << window_assembler_.rejected_windows()
                   << " valid_level_windows=" << levels.valid_windows
                   << " invalid_level_windows=" << levels.invalid_windows
                   << " min_level_left_dbfs=" << levels.minimum_dbfs(0)
@@ -518,9 +527,8 @@ private:
     sar_driver::WasapiCaptureServiceMetrics service_metrics_;
     std::uint64_t capture_period_100ns_ = 0;
     std::uint64_t qpc_frequency_ = 0;
-    std::array<float, AnalysisQueue::kSamplesPerWindow> pending_window_{};
-    std::size_t pending_frames_ = 0;
     AnalysisQueue analysis_queue_;
+    WindowAssembler window_assembler_;
     HANDLE analysis_event_ = nullptr;
     std::thread analyzer_;
     std::atomic_bool stop_analyzer_{false};
@@ -528,6 +536,7 @@ private:
     std::atomic_uint64_t analysis_wait_failures_{0};
     unsigned windows_ = 0;
     unsigned failed_windows_ = 0;
+    std::uint64_t analysis_segment_breaks_ = 0;
     double maximum_level_spread_db_ = 0.0;
     sar_driver::SignalLevelMonitor level_monitor_;
     bool renderStarted_ = false;

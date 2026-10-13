@@ -149,11 +149,31 @@ bool test_discontinuity_is_not_hidden_by_contiguous_followup_packets() {
 
 bool test_discontinuity_flag_is_independent_of_position_gap() {
     WasapiCaptureTimeline timeline;
-    timeline.Observe(0, 1000000, 480, 48000, false, false, false);
-    timeline.Observe(480, 1100000, 480, 48000, true, false, false);
+    if (timeline.Observe(0, 1000000, 480, 48000, false, false, false)) return false;
+    if (!timeline.Observe(480, 1100000, 480, 48000, true, false, false)) return false;
     const auto& stats = timeline.stats();
     return stats.discontinuity_packets == 1 && stats.position_gap_packets == 0 &&
            stats.position_overlap_packets == 0 && stats.packets == 2;
+}
+
+bool test_segment_break_reports_flags_gaps_and_overlaps() {
+    WasapiCaptureTimeline timeline;
+    if (timeline.Observe(0, 1000000, 480, 48000, false, false, false)) return false;
+    if (timeline.Observe(480, 1100000, 480, 48000, false, false, false)) return false;
+    if (!timeline.Observe(1008, 1210000, 480, 48000, false, false, false)) return false;
+    if (!timeline.Observe(1480, 1300000, 480, 48000, false, false, false)) return false;
+    if (!timeline.Observe(1960, 1400000, 480, 48000, false, true, false)) return false;
+    return timeline.stats().position_gap_packets == 1 &&
+           timeline.stats().position_overlap_packets == 1 &&
+           timeline.stats().silent_packets == 1;
+}
+
+bool test_qpc_drift_is_not_a_segment_break_but_regression_is() {
+    WasapiCaptureTimeline timeline;
+    if (timeline.Observe(0, 1000000, 480, 48000, false, false, false)) return false;
+    if (timeline.Observe(480, 1110000, 480, 48000, false, false, false)) return false;
+    return timeline.Observe(960, 1090000, 480, 48000, false, false, false) &&
+           timeline.stats().qpc_regressions == 1;
 }
 
 bool test_silent_packets_are_counted_independently_of_discontinuities() {
@@ -182,7 +202,9 @@ int main() {
                    test_discontinuity_is_not_hidden_by_contiguous_followup_packets() &&
                    test_discontinuity_flag_is_independent_of_position_gap() &&
                    test_silent_packets_are_counted_independently_of_discontinuities() &&
-                   test_maximum_gap_reports_the_largest_single_event()
+                   test_maximum_gap_reports_the_largest_single_event() &&
+                   test_segment_break_reports_flags_gaps_and_overlaps() &&
+                   test_qpc_drift_is_not_a_segment_break_but_regression_is()
                ? 0
                : 1;
 }

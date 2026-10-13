@@ -11,6 +11,7 @@ namespace sar_driver {
 struct CaptureContinuityPacket {
     std::uint32_t warmup_frames = 0;
     std::uint32_t measured_frames = 0;
+    bool segment_break = false;
 };
 
 // Removes the startup warmup interval before accumulating strict continuity
@@ -46,9 +47,10 @@ public:
                 std::numeric_limits<std::uint64_t>::max() - qpc_offset
             ? std::numeric_limits<std::uint64_t>::max()
             : qpc_position_100ns + qpc_offset;
-        timeline_.Observe(measured_position, measured_qpc, packet.measured_frames,
-                          sample_rate_, discontinuity, silent,
-                          invalid_position || sample_rate_ == 0 || timestamp_error);
+        packet.segment_break = timeline_.Observe(
+            measured_position, measured_qpc, packet.measured_frames, sample_rate_,
+            discontinuity, silent,
+            invalid_position || sample_rate_ == 0 || timestamp_error);
         return packet;
     }
 
