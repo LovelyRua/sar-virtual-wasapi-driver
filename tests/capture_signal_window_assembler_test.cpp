@@ -5,6 +5,8 @@ namespace {
 
 using Queue = sar_driver::SignalWindowQueue<3, 2, 2>;
 using Assembler = sar_driver::CaptureSignalWindowAssembler<Queue>;
+using SaturationQueue = sar_driver::SignalWindowQueue<3, 2, 3>;
+using SaturationAssembler = sar_driver::CaptureSignalWindowAssembler<SaturationQueue>;
 
 bool incomplete_segment_is_discarded_before_new_audio() {
     Queue queue;
@@ -53,8 +55,8 @@ bool repeated_breaks_count_only_frames_actually_discarded() {
 }
 
 bool full_queue_rejects_a_complete_window_and_recovers_cleanly() {
-    Queue queue;
-    Assembler assembler;
+    SaturationQueue queue;
+    SaturationAssembler assembler;
     const auto append_window = [&](float value) {
         bool completed = false;
         for (int frame = 0; frame < 3; ++frame) {
