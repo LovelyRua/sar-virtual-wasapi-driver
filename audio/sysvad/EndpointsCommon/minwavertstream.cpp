@@ -1215,7 +1215,39 @@ NTSTATUS CMiniportWaveRTStream::SetState
 
             if (IsBridgeRender() || IsBridgeCapture())
             {
-                pAdapterComm->BridgeReset(BridgeBus());
+                SAR_BRIDGE_STATS bridgeStats = {};
+                pAdapterComm->BridgeTakeStats(BridgeBus(), &bridgeStats);
+                if (bridgeStats.SilentFrames != 0 || bridgeStats.DroppedFrames != 0)
+                {
+                    // Major glitch code 4 reports aggregate bridge loss:
+                    // data1=silent frames, data2=dropped frames, data4=bus.
+                    pAdapterComm->WriteEtwEvent(eMINIPORT_GLITCH_REPORT,
+                                                bridgeStats.SilentFrames,
+                                                bridgeStats.DroppedFrames,
+                                                4,
+                                                BridgeBus());
+                }
+                if (bridgeStats.UnderrunReads != 0)
+                {
+                    // Major glitch code 5 reports read-underflow shape:
+                    // data1=underrun reads, data2=largest missing frames.
+                    pAdapterComm->WriteEtwEvent(eMINIPORT_GLITCH_REPORT,
+                                                bridgeStats.UnderrunReads,
+                                                bridgeStats.MaximumMissingFrames,
+                                                5,
+                                                BridgeBus());
+                }
+                if (bridgeStats.InvalidReadBytes != 0 ||
+                    bridgeStats.InvalidWriteBytes != 0)
+                {
+                    // Major glitch code 6 reports rejected bridge I/O bytes:
+                    // data1=invalid read bytes, data2=invalid write bytes.
+                    pAdapterComm->WriteEtwEvent(eMINIPORT_GLITCH_REPORT,
+                                                bridgeStats.InvalidReadBytes,
+                                                bridgeStats.InvalidWriteBytes,
+                                                6,
+                                                BridgeBus());
+                }
             }
 
             // Wait until all work items are completed.

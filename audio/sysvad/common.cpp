@@ -178,8 +178,7 @@ class CAdapterCommon :
         STDMETHODIMP_(VOID) BridgeRead(_In_ ULONG Bus,
                                       _Out_writes_bytes_(Bytes) BYTE* Data,
                                       _In_ ULONG Bytes);
-        STDMETHODIMP_(VOID) BridgeReset(_In_ ULONG Bus);
-        STDMETHODIMP_(VOID) BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats);
+        STDMETHODIMP_(VOID) BridgeTakeStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats);
 
         STDMETHODIMP_(void)     SetWaveServiceGroup
         (   
@@ -833,33 +832,29 @@ CAdapterCommon::BridgeRead(_In_ ULONG Bus, _Out_writes_bytes_(Bytes) BYTE* Data,
 }
 
 STDMETHODIMP_(VOID)
-CAdapterCommon::BridgeReset(_In_ ULONG Bus)
-{
-    if (Bus >= 2) return;
-    CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
-    m_BridgeRing[Bus].Reset();
-    m_BridgeInvalidWriteBytes[Bus] = 0;
-    m_BridgeInvalidReadBytes[Bus] = 0;
-    m_BridgeWriteCalls[Bus] = 0;
-    m_BridgeReadCalls[Bus] = 0;
-}
-
-STDMETHODIMP_(VOID)
-CAdapterCommon::BridgeGetStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats)
+CAdapterCommon::BridgeTakeStats(_In_ ULONG Bus, _Out_ PSAR_BRIDGE_STATS Stats)
 {
     if (Stats == NULL) return;
     RtlZeroMemory(Stats, sizeof(*Stats));
     if (Bus >= 2) return;
 
     CBridgeSpinLockGuard lock(&m_BridgeLock[Bus]);
-    Stats->QueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].queued_frames());
-    Stats->PeakQueuedFrames = static_cast<ULONG>(m_BridgeRing[Bus].peak_queued_frames());
-    Stats->DroppedFrames = m_BridgeRing[Bus].dropped_frames();
-    Stats->SilentFrames = m_BridgeRing[Bus].silent_frames();
+    const auto ringStats = m_BridgeRing[Bus].TakeStats();
+    Stats->QueuedFrames = static_cast<ULONG>(ringStats.queued_frames);
+    Stats->PeakQueuedFrames = static_cast<ULONG>(ringStats.peak_queued_frames);
+    Stats->DroppedFrames = ringStats.dropped_frames;
+    Stats->SilentFrames = ringStats.silent_frames;
+    Stats->UnderrunReads = ringStats.underrun_reads;
+    Stats->MaximumMissingFrames = static_cast<ULONG>(ringStats.maximum_missing_frames);
     Stats->InvalidWriteBytes = m_BridgeInvalidWriteBytes[Bus];
     Stats->InvalidReadBytes = m_BridgeInvalidReadBytes[Bus];
     Stats->WriteCalls = m_BridgeWriteCalls[Bus];
     Stats->ReadCalls = m_BridgeReadCalls[Bus];
+
+    m_BridgeInvalidWriteBytes[Bus] = 0;
+    m_BridgeInvalidReadBytes[Bus] = 0;
+    m_BridgeWriteCalls[Bus] = 0;
+    m_BridgeReadCalls[Bus] = 0;
 }
 
 //=============================================================================

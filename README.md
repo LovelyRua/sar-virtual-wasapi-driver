@@ -20,6 +20,21 @@ primitive with standalone tests. The experimental bridge uses it in the
 kernel stream callbacks. Passing its unit tests or the driver build does not
 prove endpoint audio transfer.
 
+The ring records zero-filled read underruns separately from normal reads,
+including the number of underrun reads and the largest missing frame count.
+When either supported experimental bridge stream stops, it atomically takes
+and resets that bus's counters under the bridge lock, then summarizes a
+nonzero bridge underrun or overflow through the existing PortCls glitch ETW
+event (major glitch codes `4`, `5`, and `6`). Code `4` carries zero-filled
+frames in data 1 and dropped frames in data 2; code `5` carries underrun-read
+count in data 1 and the largest missing-frame count in data 2. Code `6` carries
+rejected read bytes in data 1 and rejected write bytes in data 2. All carry the
+bridge bus index in data 4. These summaries are emitted outside the audio copy
+loop to avoid per-period ETW traffic. Capture a Windows Audio ETW trace while
+running and stopping the lab probe to inspect them. A missing summary is not
+proof of a clean run unless the trace was active and either bridge stream
+reached the stop transition.
+
 The bridge currently connects Speaker render to MicArray1 capture and
 SpeakerHeadphone render to MicArray2 capture as two isolated experimental
 buses. Each uses a fixed 4096-frame ring in nonpaged adapter storage and emits

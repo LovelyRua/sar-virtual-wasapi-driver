@@ -70,17 +70,45 @@ int main() {
     for (size_t i = 0; i < 8; ++i) CHECK(output[i] == long_input[i + 4]);
     for (size_t i = 8; i < 12; ++i) CHECK(output[i] == 0);
     CHECK(ring.silent_frames() == 2);
+    CHECK(ring.underrun_reads() == 1);
+    CHECK(ring.maximum_missing_frames() == 2);
     CHECK(ring.peak_queued_frames() == 4);
 
     ring.Reset();
     CHECK(ring.queued_frames() == 0 && ring.dropped_frames() == 0 &&
-          ring.silent_frames() == 0 && ring.peak_queued_frames() == 0);
+          ring.silent_frames() == 0 && ring.underrun_reads() == 0 &&
+          ring.maximum_missing_frames() == 0 && ring.peak_queued_frames() == 0);
     CHECK(ring.Read(output, 1) == 0);
     CHECK(output[0] == 0 && output[1] == 0);
     CHECK(ring.silent_frames() == 1);
+    CHECK(ring.underrun_reads() == 1 && ring.maximum_missing_frames() == 1);
     CHECK(ring.Write(nullptr, 1).accepted_frames == 0);
     CHECK(ring.queued_frames() == 0);
+
+    // The detailed read result exposes bridge underruns without changing the
+    // existing zero-fill behavior or the compatibility Read() return value.
+    ring.Reset();
+    CHECK(ring.Write(first, 2).accepted_frames == 2);
+    const auto partial = ring.ReadWithResult(output, 4);
+    CHECK(partial.valid_frames == 2 && partial.missing_frames == 2 &&
+          partial.queued_frames == 0);
+    CHECK(ring.silent_frames() == 2 && ring.underrun_reads() == 1 &&
+          ring.maximum_missing_frames() == 2);
+    CHECK(output[0] == first[0] && output[3] == first[3]);
+    for (size_t byte = 4; byte < 8; ++byte) CHECK(output[byte] == 0);
     CHECK(ring.peak_queued_frames() == 0);
+
+    // Taking a bridge snapshot returns one coherent counter epoch and clears
+    // the ring so the next stream interval starts without stale diagnostics.
+    const auto stats = ring.TakeStats();
+    CHECK(stats.queued_frames == 0 && stats.peak_queued_frames == 2);
+    CHECK(stats.dropped_frames == 0 && stats.silent_frames == 2);
+    CHECK(stats.underrun_reads == 1 && stats.maximum_missing_frames == 2);
+    CHECK(ring.queued_frames() == 0 && ring.silent_frames() == 0 &&
+          ring.underrun_reads() == 0 && ring.maximum_missing_frames() == 0);
+    const auto nextStats = ring.TakeStats();
+    CHECK(nextStats.queued_frames == 0 && nextStats.peak_queued_frames == 0 &&
+          nextStats.silent_frames == 0 && nextStats.underrun_reads == 0);
 
     uint8_t bus_storage[2][8] = {};
     PcmFrameRing buses[2];
