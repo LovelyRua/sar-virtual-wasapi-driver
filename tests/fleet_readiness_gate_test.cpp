@@ -44,6 +44,8 @@ bool test_unready_member_resets_stability() {
 bool test_unready_sample_after_ready_restarts_full_stability_window() {
     FleetReadinessGate gate(3);
     const std::vector<std::wstring> ids{L"ROOT\\MEDIA\\0001"};
+    if (gate.observe(ids, true) || gate.stable_samples() != 1) return false;
+    if (gate.observe(ids, true) || gate.stable_samples() != 2) return false;
     if (!gate.observe(ids, true) || gate.stable_samples() != 3) return false;
     if (gate.observe(ids, false) || gate.stable_samples() != 0) return false;
     if (gate.observe(ids, true) || gate.stable_samples() != 1) return false;
