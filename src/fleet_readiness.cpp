@@ -90,7 +90,11 @@ HRESULT wait_for_fleet_readiness(unsigned timeout_ms, FleetReadiness& readiness)
         for (const auto& member : snapshot.instances) ids.push_back(member.instance.id);
         const bool all_ready = !snapshot.instances.empty() &&
                                snapshot.ready_instances() == snapshot.instances.size();
-        if (gate.observe(std::move(ids), all_ready)) {
+        const bool stable = gate.observe(std::move(ids), all_ready);
+        for (auto& member : snapshot.instances) {
+            member.stable_samples = all_ready ? gate.stable_samples() : 0;
+        }
+        if (stable) {
             snapshot.state = FleetReadinessState::ready;
             snapshot.stable_samples = gate.stable_samples();
             readiness = std::move(snapshot);

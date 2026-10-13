@@ -202,7 +202,7 @@ const wchar_t* readiness_hint(ReadinessState state) {
     case ReadinessState::stability_not_confirmed:
         return L"The topology appeared ready but did not remain ready for three consecutive inventory samples.";
     case ReadinessState::ready:
-        return L"All four endpoints are active, parented to this adapter, and expose mix formats across three samples.";
+        return L"All four endpoints are active, parented to this adapter, and expose mix formats in this snapshot.";
     default:
         return L"Readiness state is unknown.";
     }

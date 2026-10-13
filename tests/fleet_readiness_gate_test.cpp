@@ -20,6 +20,7 @@ bool test_stable_roster_requires_consecutive_ready_samples() {
     const std::vector<std::wstring> ids{L"ROOT\\MEDIA\\0001", L"ROOT\\MEDIA\\0002"};
     if (gate.observe(ids, true) || gate.stable_samples() != 1) return false;
     if (gate.observe(ids, true) || gate.stable_samples() != 2) return false;
+    if (!gate.observe(ids, true) || gate.stable_samples() != 3) return false;
     return gate.observe(ids, true) && gate.stable_samples() == 3;
 }
 
