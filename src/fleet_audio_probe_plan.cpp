@@ -9,15 +9,13 @@ namespace sar::devices {
 namespace {
 
 struct ExpectedBus {
-    const wchar_t* render_name;
-    const wchar_t* capture_name;
+    const wchar_t* render_base_name;
+    const wchar_t* capture_base_name;
 };
 
 constexpr ExpectedBus kExpectedBuses[] = {
-    {L"Speakers (System Audio Route Experimental)",
-     L"SAR Experimental Capture 1 (System Audio Route Experimental)"},
-    {L"Headphones (System Audio Route Experimental)",
-     L"SAR Experimental Capture 2 (System Audio Route Experimental)"},
+    {L"Speakers", L"SAR Experimental Capture 1"},
+    {L"Headphones", L"SAR Experimental Capture 2"},
 };
 
 bool same_id(const std::wstring& lhs, const std::wstring& rhs) {
@@ -39,12 +37,21 @@ bool endpoint_usable(const WasapiEndpoint& endpoint,
            same_id(endpoint.parent_device_id, instance_id);
 }
 
+std::wstring endpoint_name(const wchar_t* base_name,
+                           const std::wstring& instance_label) {
+    std::wstring name(base_name);
+    name += L" (";
+    name += instance_label;
+    name += L")";
+    return name;
+}
+
 const WasapiEndpoint* find_endpoint(const InstanceReadiness& instance,
-                                    const wchar_t* name,
+                                    const std::wstring& name,
                                     EndpointFlow flow) {
     const WasapiEndpoint* found = nullptr;
     for (const auto& endpoint : instance.endpoints) {
-        if (endpoint.name != name || endpoint.flow != flow) continue;
+        if (!same_id(endpoint.name, name) || endpoint.flow != flow) continue;
         if (found != nullptr) return nullptr;
         found = &endpoint;
     }
@@ -76,17 +83,22 @@ bool build_fleet_audio_probe_plan(const FleetReadiness& fleet,
 
     for (const auto& instance : fleet.instances) {
         if (!instance.ready() || instance.stable_samples < kStableReadinessSamples ||
-            instance.instance.id.empty() || instance.endpoints.size() != 4) {
+            instance.instance.id.empty() || instance.instance.label.empty() ||
+            instance.endpoints.size() != 4) {
             plan.buses.clear();
             plan.error = L"Every selected adapter must remain ready for three samples.";
             return false;
         }
 
         for (unsigned local_bus = 0; local_bus < 2; ++local_bus) {
+            const auto render_name = endpoint_name(
+                kExpectedBuses[local_bus].render_base_name, instance.instance.label);
+            const auto capture_name = endpoint_name(
+                kExpectedBuses[local_bus].capture_base_name, instance.instance.label);
             const auto* render = find_endpoint(
-                instance, kExpectedBuses[local_bus].render_name, EndpointFlow::render);
+                instance, render_name, EndpointFlow::render);
             const auto* capture = find_endpoint(
-                instance, kExpectedBuses[local_bus].capture_name, EndpointFlow::capture);
+                instance, capture_name, EndpointFlow::capture);
             if (render == nullptr || capture == nullptr ||
                 !endpoint_usable(*render, instance.instance.id, EndpointFlow::render) ||
                 !endpoint_usable(*capture, instance.instance.id, EndpointFlow::capture)) {

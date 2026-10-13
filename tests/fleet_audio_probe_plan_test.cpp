@@ -13,8 +13,9 @@ using sar::devices::FleetReadiness;
 using sar::devices::InstanceReadiness;
 using sar::devices::WasapiEndpoint;
 
-WasapiEndpoint endpoint(const std::wstring& instance_id, const wchar_t* name,
-                        const wchar_t* id, EndpointFlow flow) {
+WasapiEndpoint endpoint(const std::wstring& instance_id,
+                        const std::wstring& name, const std::wstring& id,
+                        EndpointFlow flow) {
     WasapiEndpoint result;
     result.name = name;
     result.id = id;
@@ -30,20 +31,21 @@ WasapiEndpoint endpoint(const std::wstring& instance_id, const wchar_t* name,
 InstanceReadiness instance(unsigned number) {
     const auto suffix = number == 1 ? L"0001" : L"0002";
     const std::wstring id = std::wstring(L"ROOT\\MEDIA\\") + suffix;
+    const std::wstring label = std::wstring(L"Lab ") + suffix;
     InstanceReadiness result;
     result.instance.id = id;
-    result.instance.label = std::wstring(L"Lab ") + suffix;
+    result.instance.label = label;
     result.state = sar::devices::ReadinessState::ready;
     result.stable_samples = sar::devices::kStableReadinessSamples;
     result.endpoints = {
-        endpoint(id, L"Speakers (System Audio Route Experimental)",
-                 (std::wstring(L"render-speaker-") + suffix).c_str(), EndpointFlow::render),
-        endpoint(id, L"Headphones (System Audio Route Experimental)",
-                 (std::wstring(L"render-headphone-") + suffix).c_str(), EndpointFlow::render),
-        endpoint(id, L"SAR Experimental Capture 1 (System Audio Route Experimental)",
-                 (std::wstring(L"capture-1-") + suffix).c_str(), EndpointFlow::capture),
-        endpoint(id, L"SAR Experimental Capture 2 (System Audio Route Experimental)",
-                 (std::wstring(L"capture-2-") + suffix).c_str(), EndpointFlow::capture),
+        endpoint(id, L"Speakers (" + label + L")",
+                 L"render-speaker-" + suffix, EndpointFlow::render),
+        endpoint(id, L"Headphones (" + label + L")",
+                 L"render-headphone-" + suffix, EndpointFlow::render),
+        endpoint(id, L"SAR Experimental Capture 1 (" + label + L")",
+                 L"capture-1-" + suffix, EndpointFlow::capture),
+        endpoint(id, L"SAR Experimental Capture 2 (" + label + L")",
+                 L"capture-2-" + suffix, EndpointFlow::capture),
     };
     return result;
 }
@@ -114,6 +116,14 @@ bool test_endpoint_parent_must_match_instance() {
            plan.buses.empty();
 }
 
+bool test_endpoint_names_must_match_registered_instance_label() {
+    FleetAudioProbePlan plan;
+    auto input = fleet();
+    input.instances[0].instance.label = L"Renamed after endpoint publication";
+    return !sar::devices::build_fleet_audio_probe_plan(input, plan) &&
+           plan.buses.empty();
+}
+
 bool test_missing_or_ambiguous_expected_endpoint_is_rejected() {
     FleetAudioProbePlan plan;
     auto missing = fleet();
@@ -160,6 +170,7 @@ int main() {
                    test_empty_or_oversized_fleet_is_rejected() &&
                    test_unstable_or_unready_fleet_is_rejected() &&
                    test_endpoint_parent_must_match_instance() &&
+                   test_endpoint_names_must_match_registered_instance_label() &&
                    test_missing_or_ambiguous_expected_endpoint_is_rejected() &&
                    test_non_stereo_or_non_48khz_endpoint_is_rejected() &&
                    test_duplicate_endpoint_ids_across_instances_are_rejected_case_insensitively() &&
