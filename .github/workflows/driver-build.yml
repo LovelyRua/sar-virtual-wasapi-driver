@@ -55,6 +55,17 @@ jobs:
           foreach ($name in @('ComponentizedAudioSample.inf', 'TabletAudioSample.sys', 'KeywordDetectorContosoAdapter.dll')) {
             Copy-Item -LiteralPath (Join-Path $evidence $name) -Destination $package
           }
+          cmake -S . -B lab-tools-build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Lab tools CMake configure failed' }
+          cmake --build lab-tools-build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Lab tools build failed' }
+          ctest --test-dir lab-tools-build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Transport tests failed while preparing the lab package' }
+          foreach ($name in @('sar_endpoint_manager.exe', 'wasapi_bridge_probe.exe', 'wasapi_dual_bus_probe.exe')) {
+            $toolPath = Join-Path (Join-Path $PWD 'lab-tools-build/Release') $name
+            if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) { throw "Missing lab tool: $name" }
+            Copy-Item -LiteralPath $toolPath -Destination $evidence
+          }
           $pinnedToolDir = Join-Path $PWD 'packages/Microsoft.Windows.WDK.x64.10.0.28000.2526/c/bin/10.0.28000.0/x64'
           $inf2catCandidates = @(
             (Join-Path $pinnedToolDir 'Inf2Cat.exe')
@@ -80,6 +91,60 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $package 'sysvad.cat'))) {
             throw 'Core package catalog generation failed'
           }
+          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty Source
+          if (-not $signtool) {
+            $signtoolCandidates = @()
+            foreach ($root in @('C:/Program Files (x86)/Windows Kits/10/bin', 'C:/Program Files/Windows Kits/10/bin')) {
+              if (Test-Path -LiteralPath $root -PathType Container) {
+                foreach ($version in (Get-ChildItem -LiteralPath $root -Directory | Sort-Object Name -Descending)) {
+                  $signtoolCandidates += Join-Path $version.FullName 'x64/signtool.exe'
+                }
+              }
+            }
+            $signtool = $signtoolCandidates |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+              Select-Object -First 1
+          }
+          if (-not $signtool) { throw 'Windows SDK signtool.exe was not found' }
+
+          $certificate = $null
+          $certificatePath = Join-Path $evidence 'SAR-Lab-TestSigning.cer'
+          $catalogPath = Join-Path $package 'sysvad.cat'
+          try {
+            $certificate = New-SelfSignedCertificate `
+              -Type CodeSigningCert `
+              -Subject "CN=SAR Lab Ephemeral Test Signing $env:GITHUB_RUN_ID" `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -KeyAlgorithm RSA `
+              -KeyLength 2048 `
+              -HashAlgorithm SHA256 `
+              -NotAfter (Get-Date).AddDays(7)
+            Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
+            Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+            Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+
+            & $signtool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $catalogPath
+            if ($LASTEXITCODE -ne 0) { throw 'Signing the lab catalog failed' }
+            & $signtool verify /pa /v $catalogPath
+            if ($LASTEXITCODE -ne 0) { throw 'Lab catalog signature verification failed' }
+            Copy-Item -LiteralPath $catalogPath -Destination (Join-Path $evidence 'sysvad.cat') -Force
+          }
+          finally {
+            if ($certificate) {
+              foreach ($store in @('Root', 'TrustedPublisher', 'My')) {
+                Remove-Item -LiteralPath "Cert:\CurrentUser\$store\$($certificate.Thumbprint)" -ErrorAction SilentlyContinue
+              }
+            }
+          }
+
+          @(
+            'VM24-only, test-signed SysVAD experiment package.'
+            'The signing private key was generated on the CI runner and was not included.'
+            'Install SAR-Lab-TestSigning.cer into LocalMachine Root and TrustedPublisher only on the disposable driver lab.'
+            "Certificate thumbprint: $($certificate.Thumbprint)"
+            'Remove that certificate and the test driver after the experiment. This is not a SAR release package.'
+          ) | Set-Content -Path (Join-Path $evidence 'LAB-ONLY.txt')
           Get-ChildItem -Path $evidence -Recurse -File |
             ForEach-Object { "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, [IO.Path]::GetRelativePath($evidence, $_.FullName) } |
             Set-Content -Path (Join-Path $evidence 'SHA256SUMS.txt')

@@ -92,18 +92,37 @@ build outputs must not be committed.
 The `SysVAD build` workflow restores the upstream pinned WDK NuGet packages
 and compiles `TabletAudioSample` plus the keyword detector adapter required
 by its INF. The optional APO projects are deliberately excluded at this
-stage. CI does not publish or install the generated driver binary.
+stage. Push and pull-request runs compile only and do not publish a driver.
 
 A manually dispatched CI run retains a three-day build-evidence artifact with
-the driver binary, INF-required adapter DLL, generated INF/catalog files if
-present, and SHA-256 hashes.
-It also runs Inf2Cat for Windows 11 25H2 x64 over a self-contained
-`core-package/` directory containing the core INF, SYS, adapter DLL, and
-unsigned `sysvad.cat`. Catalog generation checks package signability but does
-not sign the catalog or make the package installable under normal boot policy.
-It is not a release or an installable package: CI's temporary signing identity
-is not provisioned on the driver lab. Build and sign locally inside the
-dedicated lab before attempting endpoint installation.
+the driver binary, INF-required adapter DLL, generated INF/catalog files, and
+the endpoint manager and two WASAPI probes. The same run builds those lab tools
+and runs the complete CTest suite before upload. It also records SHA-256 hashes.
+The workflow runs Inf2Cat for Windows 11 25H2 x64, signs the
+self-contained `core-package/` catalog using an ephemeral seven-day
+code-signing certificate, and verifies the signature before upload. The
+private key exists only on the ephemeral CI runner; the artifact contains the
+public `.cer` file.
+
+This is a test-signed SysVAD experiment package, not a SAR release or a
+production-trusted driver. Use it only on the disposable VM24 driver lab while
+test-signing mode is enabled. Import `SAR-Lab-TestSigning.cer` into the lab's
+Local Machine `Root` and `TrustedPublisher` stores from an elevated PowerShell
+session, then run the normal lab preflight and endpoint-manager install checks:
+
+```powershell
+Import-Certificate -FilePath .\SAR-Lab-TestSigning.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\SAR-Lab-TestSigning.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+.\scripts\lab-preflight.ps1 -PackagePath .\core-package
+.\sar_endpoint_manager.exe add .\core-package\ComponentizedAudioSample.inf "VM24 Bridge Diagnostics"
+```
+
+The manager prints the created PnP instance ID and waits for endpoint readiness.
+Run the WASAPI probes from a logged-on desktop session. After the experiment,
+remove that specific instance with
+`.\sar_endpoint_manager.exe remove <instance-id> --confirm`, then remove the
+certificate thumbprint listed in `LAB-ONLY.txt` from both machine stores. Do
+not reuse or distribute this identity.
 
 On the lab, run `scripts/lab-preflight.ps1 -PackagePath <core-package>` to
 record the package hashes, administrator token, Secure Boot, test-signing, and
