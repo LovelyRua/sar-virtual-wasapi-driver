@@ -657,7 +657,7 @@ not a stable SAR endpoint result.
 The WASAPI probe now registers its event-servicing thread with MMCSS `Pro Audio`
 and falls back to `Audio`. Registration is scoped and reverted when the probe
 exits; failure is reported and does not relax the continuity gate. The Windows
-CI run passed 11/11 CTest cases, 5 endpoint-inventory cases, and 17 interactive
+CI run passed 11/11 CTest cases, 5 endpoint-inventory cases, and 21 interactive
 launcher cases. The launcher can now forward the probe's optional maximum
 level-spread threshold (default remains disabled).
 
@@ -681,3 +681,29 @@ in this test, and more repeated same-binary A/B runs are needed before treating
 the scheduling change as causal or the route as production-stable. The complete logs remain on VM24
 under `C:\sar-lab\mmcss-20261013-01`; temporary executables, scripts, and the
 interactive scheduled task were removed after testing.
+
+### Same-binary interleaved result (2026-10-13)
+
+The diagnostic-only `--no-mmcss` switch now permits a fair comparison without
+changing binaries. On VM24, four valid 60-second controls and four valid
+60-second MMCSS runs used the same probe executable from build `666063f`, the
+same interactive desktop, 48 kHz VB-Cable loopback endpoint pair, and a 1 dB
+level-spread gate. One balanced control/treatment/treatment/control block was
+completed; two additional valid samples per arm were retained as repeats. One
+earlier control attempt produced no report because the scheduled task vanished
+during polling; it was excluded and prompted a launcher race fix.
+
+All four no-MMCSS controls had content pass and zero silent frames, but all
+failed continuity: 21-29 discontinuities, 17-21 measured position-gap packets,
+and 9,888-16,032 missing frames. All four MMCSS runs had zero discontinuities,
+zero position-gap packets/frames, and zero silent frames. This is strong,
+repeatable evidence that MMCSS scheduling materially improves event servicing
+for this VM's VB-Cable loopback path, but it is not proof of a SAR endpoint or
+driver fix: VM24 had no SAR audio endpoint in the inventory.
+
+The level result is separate: only one of four controls and three of four MMCSS
+runs passed the 1 dB level gate. One MMCSS run had 1.60 dB left and 2.08 dB
+right spread despite perfect timeline continuity. Therefore MMCSS must not be
+treated as a level-stability fix. Full reports are retained on VM24 in
+`C:\sar-lab\mmcss-ab-666063f`; the interactive scheduled task was removed after
+each run, and no driver or boot-security settings were changed.
