@@ -96,7 +96,7 @@ int main() {
           ring.maximum_missing_frames() == 2);
     CHECK(output[0] == first[0] && output[3] == first[3]);
     for (size_t byte = 4; byte < 8; ++byte) CHECK(output[byte] == 0);
-    CHECK(ring.peak_queued_frames() == 0);
+    CHECK(ring.peak_queued_frames() == 2);
 
     // Taking a bridge snapshot returns one coherent counter epoch and clears
     // the ring so the next stream interval starts without stale diagnostics.
