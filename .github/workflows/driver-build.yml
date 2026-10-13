@@ -145,9 +145,9 @@ jobs:
           $certificatePemPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pem'
           $privateKeyPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.key'
           $privateKeyPfx = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pfx'
+          $verifiedPayloadPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-Catalog.payload'
           $privateKeyPassword = [Guid]::NewGuid().ToString('N')
           $env:SAR_LAB_PFX_PASSWORD = $privateKeyPassword
-          $temporaryStores = [System.Collections.Generic.List[object]]::new()
           try {
             Write-Host 'Generating a seven-day RSA code-signing certificate with OpenSSL'
             & $openSsl req -new -x509 -newkey rsa:2048 -sha256 -days 7 -nodes `
@@ -166,49 +166,22 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PKCS#12 export failed' }
             $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
             if (-not $certificate.Thumbprint) { throw 'Generated public certificate has no thumbprint' }
-            Write-Host 'Trusting the public certificate in the temporary current-user root store'
-            $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-              'Root', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $temporaryStores.Add($rootStore)
-            $rootStore.Add($certificate)
-            Write-Host 'Trusting the public certificate in the temporary publisher store'
-            $publisherStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-              'TrustedPublisher', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-            $publisherStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $temporaryStores.Add($publisherStore)
-            $publisherStore.Add($certificate)
             Write-Host "Signing catalog with certificate $($certificate.Thumbprint)"
             & $signtool sign /v /fd SHA256 /f $privateKeyPfx /p $privateKeyPassword $catalogPath
             if ($LASTEXITCODE -ne 0) { throw 'Signing the lab catalog failed' }
-            Write-Host 'Verifying catalog signature'
-            & $signtool verify /pa /v $catalogPath
-            if ($LASTEXITCODE -ne 0) { throw 'Lab catalog signature verification failed' }
+            Write-Host 'Verifying catalog CMS signature against only the generated certificate'
+            & $openSsl cms -verify -binary -inform DER -in $catalogPath `
+              -certfile $certificatePemPath -nointern -noverify -out $verifiedPayloadPath
+            if ($LASTEXITCODE -ne 0) { throw 'Lab catalog CMS signature verification failed' }
             Copy-Item -LiteralPath $catalogPath -Destination (Join-Path $evidence 'sysvad.cat') -Force
             Set-Content -Path (Join-Path $evidence 'CERT-THUMBPRINT.txt') -Value $certificate.Thumbprint
           }
           finally {
-            try {
-              foreach ($store in $temporaryStores) {
-                try {
-                  if ($certificate -and $store.IsOpen) { $store.Remove($certificate) }
-                }
-                catch {
-                  Write-Warning "Could not remove temporary certificate from $($store.Name): $_"
-                }
-                finally {
-                  try { $store.Close() } catch { Write-Warning "Could not close $($store.Name): $_" }
-                  $store.Dispose()
-                }
-              }
-              if ($certificate) { $certificate.Dispose() }
+            if ($certificate) { $certificate.Dispose() }
+            foreach ($path in @($certificatePemPath, $privateKeyPath, $privateKeyPfx, $verifiedPayloadPath)) {
+              Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
             }
-            finally {
-              foreach ($path in @($certificatePemPath, $privateKeyPath, $privateKeyPfx)) {
-                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-              }
-              Remove-Item Env:SAR_LAB_PFX_PASSWORD -ErrorAction SilentlyContinue
-            }
+            Remove-Item Env:SAR_LAB_PFX_PASSWORD -ErrorAction SilentlyContinue
           }
 
       - name: Create lab artifact manifest
