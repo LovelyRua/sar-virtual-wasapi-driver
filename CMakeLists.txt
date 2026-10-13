@@ -115,6 +115,7 @@ if(WIN32)
     src/wasapi_inventory.cpp
     src/endpoint_readiness.cpp
     src/fleet_readiness.cpp
+    src/fleet_audio_probe_plan.cpp
   )
   target_compile_features(sar_device_instances PUBLIC cxx_std_17)
   target_include_directories(sar_device_instances PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -137,6 +138,15 @@ if(WIN32)
   add_test(NAME device_instances_test COMMAND device_instances_test)
   set_tests_properties(device_instances_test PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+  add_executable(fleet_audio_probe_plan_test
+    tests/fleet_audio_probe_plan_test.cpp)
+  target_compile_features(fleet_audio_probe_plan_test PRIVATE cxx_std_17)
+  target_link_libraries(fleet_audio_probe_plan_test PRIVATE sar_device_instances)
+  if(MSVC)
+    target_compile_options(fleet_audio_probe_plan_test PRIVATE /W4 /WX)
+  endif()
+  add_test(NAME fleet_audio_probe_plan_test COMMAND fleet_audio_probe_plan_test)
 
   add_executable(wasapi_bridge_probe tests/wasapi_bridge_probe.cpp)
   target_compile_features(wasapi_bridge_probe PRIVATE cxx_std_17)

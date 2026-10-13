@@ -162,6 +162,7 @@ for installer or GUI orchestration:
 ```bat
 sar_endpoint_manager.exe fleet --json
 sar_endpoint_manager.exe wait-fleet 30000 --json
+sar_endpoint_manager.exe probe-plan 30000 --json
 ```
 
 For `fleet`, exit code 0 means every adapter is ready in that snapshot. For
@@ -172,6 +173,29 @@ found no SAR instances. This is an inventory/readiness check, not an
 audio-transfer test. The prototype still allows at most two adapters, each
 with two fixed render/capture bus pairs; arbitrary channel counts and dynamic
 topology remain future work.
+
+`probe-plan` waits for the same stable fleet window, then maps each adapter's
+two documented render/capture pairs using exact endpoint names and PnP parent
+IDs. It rejects unstable members, duplicate or mis-parented endpoint IDs, and
+anything other than active 48 kHz stereo endpoints. Its JSON bus list is ordered
+for the four-bus signal probe. To run the complete interactive test and retain
+machine-readable evidence, use:
+
+```powershell
+scripts/lab-fleet-audio-probe.ps1 `
+  -EndpointManagerPath .\sar_endpoint_manager.exe `
+  -ProbePath .\wasapi_dual_bus_probe.exe `
+  -DurationSeconds 60 `
+  -MaximumLevelSpreadDb 1.0 `
+  -OutputPath C:\SARLab\fleet-audio-report.json
+```
+
+The runner executes the probe in the logged-on desktop session, checks the
+actual probe exit status, and records the stable plan plus raw per-bus output.
+The launcher uses a per-run scheduled-task name so simultaneous lab runs do not
+replace or unregister each other's task. This test measures audio passing
+through each virtual bus independently; it does not establish cross-adapter
+mixing or arbitrary dynamic channel topology.
 
 After installing the experimental driver in the dedicated lab, build the
 standalone user-mode probes with CMake and run them in an interactive audio

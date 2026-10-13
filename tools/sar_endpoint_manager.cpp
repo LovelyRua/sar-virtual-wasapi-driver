@@ -3,6 +3,7 @@
 #include "src/device_instances.h"
 #include "src/endpoint_readiness.h"
 #include "src/fleet_readiness.h"
+#include "src/fleet_audio_probe_plan.h"
 #include "src/wasapi_inventory.h"
 
 #include <windows.h>
@@ -34,6 +35,7 @@ void usage() {
         << L"  sar_endpoint_manager wait-ready <instance-id> <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager fleet [--json]\n"
         << L"  sar_endpoint_manager wait-fleet <timeout-ms> [--json]\n"
+        << L"  sar_endpoint_manager probe-plan <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager help\n\n"
         << L"Prototype limit: two instances, each with two fixed render/capture bus pairs.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
@@ -430,6 +432,70 @@ bool parse_timeout(const wchar_t* text, unsigned& timeout_ms) {
     return true;
 }
 
+void print_probe_plan_json(const sar::devices::FleetReadiness& fleet,
+                           const sar::devices::FleetAudioProbePlan& plan) {
+    std::wcout << L"{\"state\":";
+    json_string(plan.ready() ? L"ready" :
+                sar::devices::fleet_readiness_state_name(fleet.state));
+    std::wcout << L",\"ready\":" << (plan.ready() ? L"true" : L"false")
+               << L",\"stableSamples\":" << fleet.stable_samples
+               << L",\"instanceCount\":" << fleet.instances.size()
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(fleet.inventory_error)
+               << L",\"busCount\":" << plan.buses.size()
+               << L",\"error\":";
+    json_string(plan.error);
+    std::wcout << L",\"buses\":[";
+    for (size_t index = 0; index < plan.buses.size(); ++index) {
+        if (index) std::wcout << L',';
+        const auto& bus = plan.buses[index];
+        std::wcout << L"{\"instanceId\":";
+        json_string(bus.instance_id);
+        std::wcout << L",\"instanceLabel\":";
+        json_string(bus.instance_label);
+        std::wcout << L",\"fleetBus\":" << bus.fleet_bus
+                   << L",\"instanceBus\":" << bus.instance_bus
+                   << L",\"renderEndpointId\":";
+        json_string(bus.render_endpoint_id);
+        std::wcout << L",\"captureEndpointId\":";
+        json_string(bus.capture_endpoint_id);
+        std::wcout << L'}';
+    }
+    std::wcout << L"]}";
+}
+
+int probe_plan(unsigned timeout_ms, bool as_json) {
+    sar::devices::FleetReadiness readiness;
+    const HRESULT result = sar::devices::wait_for_fleet_readiness(timeout_ms, readiness);
+    sar::devices::FleetAudioProbePlan plan;
+    sar::devices::build_fleet_audio_probe_plan(readiness, plan);
+
+    if (as_json) {
+        print_probe_plan_json(readiness, plan);
+        std::wcout << L'\n';
+    } else if (plan.ready()) {
+        std::wcout << L"Stable fleet audio probe plan: " << plan.buses.size()
+                   << L" bus pairs across " << readiness.instances.size()
+                   << L" adapter(s)\n";
+        for (const auto& bus : plan.buses) {
+            std::wcout << L"  bus " << bus.fleet_bus << L" (adapter bus "
+                       << bus.instance_bus << L") | " << bus.instance_id << L" |\n"
+                       << L"    render: " << bus.render_endpoint_id << L'\n'
+                       << L"    capture: " << bus.capture_endpoint_id << L'\n';
+        }
+    } else {
+        std::wcerr << L"Audio probe plan unavailable: " << plan.error << L'\n';
+        print_fleet(readiness);
+    }
+
+    if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 1;
+    if (plan.ready()) return 0;
+    if (result == HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 3;
+    if (readiness.state == sar::devices::FleetReadinessState::no_instances &&
+        SUCCEEDED(result)) return 4;
+    return 1;
+}
+
 int list() {
     std::vector<sar::devices::Instance> items;
     const auto result = sar::devices::list(items);
@@ -556,6 +622,13 @@ int wmain(int argc, wchar_t** argv) {
         const bool as_json = argc == 4 && std::wcscmp(argv[3], L"--json") == 0;
         if (argc == 4 && !as_json) return 2;
         return fleet(true, timeout_ms, as_json);
+    }
+    if ((argc == 3 || argc == 4) && std::wcscmp(argv[1], L"probe-plan") == 0) {
+        unsigned timeout_ms = 0;
+        if (!parse_timeout(argv[2], timeout_ms)) return 2;
+        const bool as_json = argc == 4 && std::wcscmp(argv[3], L"--json") == 0;
+        if (argc == 4 && !as_json) return 2;
+        return probe_plan(timeout_ms, as_json);
     }
 
     if (argc == 4 && std::wcscmp(argv[1], L"add") == 0) {

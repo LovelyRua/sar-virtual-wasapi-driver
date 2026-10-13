@@ -29,6 +29,7 @@ function Assert-Rejected([hashtable] $Arguments, [string] $ExpectedMessage) {
 try {
     $global:SarCapturedActionArgument = $null
     $global:SarTaskDisappears = $false
+$global:SarFakeProbeStatus = 'PROBE_EXIT=0'
     function New-ScheduledTaskAction {
         param([string] $Execute, [string] $Argument)
         [pscustomobject]@{ Execute = $Execute; Argument = $Argument }
@@ -45,7 +46,9 @@ try {
         param($TaskName, $Action, $Principal, $Settings, [switch] $Force)
         $global:SarCapturedActionArgument = $Action.Argument
     }
-    function Start-ScheduledTask { Set-Content -LiteralPath $reportPath -Value 'PROBE_EXIT=0' }
+    function Start-ScheduledTask {
+        Set-Content -LiteralPath $reportPath -Value @('synthetic probe output', $global:SarFakeProbeStatus)
+    }
     function Get-ScheduledTask {
         [CmdletBinding()]
         param([string] $TaskName)
@@ -72,6 +75,14 @@ try {
         throw 'Launcher did not accept a completed report after the scheduled task disappeared.'
     }
 
+    $global:SarFakeProbeStatus = 'PROBE_EXIT=7'
+    Assert-Rejected $base 'WASAPI probe failed with exit code 7.'
+    $global:SarFakeProbeStatus = 'missing-status'
+    Assert-Rejected $base 'Interactive probe report must contain exactly one PROBE_EXIT status line.'
+    $global:SarFakeProbeStatus = @('PROBE_EXIT=0', 'PROBE_EXIT=1')
+    Assert-Rejected $base 'Interactive probe report must contain exactly one PROBE_EXIT status line.'
+    $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
+
     $singleWithExtra = $base.Clone()
     $singleWithExtra.RenderId2 = $validRender2
     $singleWithExtra.CaptureId2 = $validCapture2
@@ -82,6 +93,18 @@ try {
     $invalidEndpoint.RenderId2 = 'not-a-wasapi-id'
     $invalidEndpoint.CaptureId2 = $validCapture2
     Assert-Rejected $invalidEndpoint 'Invalid WASAPI endpoint ID:'
+
+    $wrongFlow = $base.Clone()
+    $wrongFlow.Mode = 'dual_bus'
+    $wrongFlow.RenderId2 = $validRender2
+    $wrongFlow.CaptureId2 = $validRender3
+    Assert-Rejected $wrongFlow 'requires a capture endpoint at position 3.'
+
+    $duplicateEndpoint = $base.Clone()
+    $duplicateEndpoint.Mode = 'dual_bus'
+    $duplicateEndpoint.RenderId2 = $validRender
+    $duplicateEndpoint.CaptureId2 = $validCapture2
+    Assert-Rejected $duplicateEndpoint 'Endpoint IDs must be unique across the probe:'
 
     $oneExtra = $base.Clone()
     $oneExtra.Mode = 'multi_bus'
@@ -218,7 +241,7 @@ try {
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=21'
+    Write-Output 'lab_interactive_probe_tests passed=26'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }

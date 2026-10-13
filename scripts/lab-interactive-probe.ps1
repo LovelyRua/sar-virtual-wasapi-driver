@@ -63,12 +63,25 @@ foreach ($id in $ids) {
         throw "Invalid WASAPI endpoint ID: $id"
     }
 }
+for ($index = 0; $index -lt $ids.Count; $index++) {
+    $flowPrefix = if (($index % 2) -eq 0) { '{0.0.0.00000000}.' } else { '{0.0.1.00000000}.' }
+    if (-not $ids[$index].StartsWith($flowPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $flow = if (($index % 2) -eq 0) { 'render' } else { 'capture' }
+        throw "Endpoint pair $([Math]::Floor($index / 2)) requires a $flow endpoint at position $index."
+    }
+}
+$seenEndpointIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($id in $ids) {
+    if (-not $seenEndpointIds.Add($id)) {
+        throw "Endpoint IDs must be unique across the probe: $id"
+    }
+}
 if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue |
           Where-Object SessionId -gt 0)) {
     throw 'No interactive desktop session is logged on.'
 }
 
-$taskName = 'SARLab-InteractiveAudioProbe'
+$taskName = "SARLab-InteractiveAudioProbe-$([guid]::NewGuid().ToString('N'))"
 $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
 $levelLimit = ''
@@ -112,7 +125,20 @@ try {
     if (-not (Test-Path -LiteralPath $OutputPath)) {
         throw "Interactive task completed without a probe report: $((Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult)"
     }
-    Get-Content -LiteralPath $OutputPath
+    $probeOutput = @(Get-Content -LiteralPath $OutputPath)
+    $probeOutput
+    $probeExitCodes = @()
+    foreach ($line in $probeOutput) {
+        if ([string]$line -match '^PROBE_EXIT=(\d+)$') {
+            $probeExitCodes += [int]$Matches[1]
+        }
+    }
+    if ($probeExitCodes.Count -ne 1) {
+        throw 'Interactive probe report must contain exactly one PROBE_EXIT status line.'
+    }
+    if ($probeExitCodes[0] -ne 0) {
+        throw "WASAPI probe failed with exit code $($probeExitCodes[0])."
+    }
 } finally {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
