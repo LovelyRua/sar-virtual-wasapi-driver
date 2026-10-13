@@ -163,11 +163,14 @@ jobs:
             & $openSsl pkcs12 -export -out $privateKeyPfx -inkey $privateKeyPath `
               -in $certificatePemPath -passout env:SAR_LAB_PFX_PASSWORD
             if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PKCS#12 export failed' }
-            Write-Host 'Importing public certificate into temporary root store'
-            $certificate = Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\Root
-            if (-not $certificate) { throw 'Public certificate import returned no certificate' }
-            Write-Host 'Importing public certificate into temporary publisher store'
-            Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
+            if (-not $certificate.Thumbprint) { throw 'Generated public certificate has no thumbprint' }
+            Write-Host 'Trusting the public certificate in the temporary current-user root store'
+            & certutil.exe -f -user -addstore Root $certificatePath
+            if ($LASTEXITCODE -ne 0) { throw 'Adding the lab certificate to the temporary root store failed' }
+            Write-Host 'Trusting the public certificate in the temporary publisher store'
+            & certutil.exe -f -user -addstore TrustedPublisher $certificatePath
+            if ($LASTEXITCODE -ne 0) { throw 'Adding the lab certificate to the temporary publisher store failed' }
             Write-Host "Signing catalog with certificate $($certificate.Thumbprint)"
             & $signtool sign /v /fd SHA256 /f $privateKeyPfx /p $privateKeyPassword $catalogPath
             if ($LASTEXITCODE -ne 0) { throw 'Signing the lab catalog failed' }
@@ -180,7 +183,7 @@ jobs:
           finally {
             if ($certificate) {
               foreach ($store in @('Root', 'TrustedPublisher')) {
-                Remove-Item -LiteralPath "Cert:\CurrentUser\$store\$($certificate.Thumbprint)" -ErrorAction SilentlyContinue
+                & certutil.exe -user -delstore $store $certificate.Thumbprint | Out-Null
               }
             }
             foreach ($path in @($certificatePemPath, $privateKeyPath, $privateKeyPfx)) {
