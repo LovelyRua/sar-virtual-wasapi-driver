@@ -152,6 +152,27 @@ status, endpoint IDs, and state-specific diagnostic guidance. `diagnose` is a
 point-in-time snapshot; `wait-ready` polls for up to 120 seconds and returns
 success only after stable readiness.
 
+For a multi-instance check, `fleet` reports every present SAR adapter using
+one PnP roster and one shared WASAPI endpoint snapshot. `wait-fleet` succeeds
+only when every listed instance is ready and the exact same instance-ID set
+remains ready for three consecutive samples; a new or removed adapter restarts
+that stability window. An empty fleet never reports ready. Use the JSON form
+for installer or GUI orchestration:
+
+```bat
+sar_endpoint_manager.exe fleet --json
+sar_endpoint_manager.exe wait-fleet 30000 --json
+```
+
+For `fleet`, exit code 0 means every adapter is ready in that snapshot. For
+`wait-fleet`, exit code 0 additionally means the fleet stayed ready across the
+stability window. Exit code 1 means at least one instance is not ready or
+inventory failed, 3 means the readiness timeout expired, and 4 means `fleet`
+found no SAR instances. This is an inventory/readiness check, not an
+audio-transfer test. The prototype still allows at most two adapters, each
+with two fixed render/capture bus pairs; arbitrary channel counts and dynamic
+topology remain future work.
+
 After installing the experimental driver in the dedicated lab, build the
 standalone user-mode probes with CMake and run them in an interactive audio
 session. They use WASAPI event-driven buffering, so service cadence follows

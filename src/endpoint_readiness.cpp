@@ -92,8 +92,6 @@ HRESULT inspect_instance_readiness(const std::wstring& instance_id,
         readiness.inventory_error = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
         return readiness.inventory_error;
     }
-    readiness.instance = *found;
-
     std::vector<WasapiEndpoint> endpoints;
     const HRESULT inventory_result = enumerate_wasapi_endpoints(endpoints);
     if (FAILED(inventory_result)) {
@@ -101,14 +99,24 @@ HRESULT inspect_instance_readiness(const std::wstring& instance_id,
         return inventory_result;
     }
 
-    for (auto& endpoint : endpoints) {
+    return inspect_instance_readiness(*found, endpoints, readiness);
+}
+
+HRESULT inspect_instance_readiness(
+    const Instance& instance,
+    const std::vector<WasapiEndpoint>& endpoint_snapshot,
+    InstanceReadiness& readiness) {
+    readiness = {};
+    readiness.instance = instance;
+
+    for (const auto& endpoint : endpoint_snapshot) {
         if (endpoint.state == DEVICE_STATE_ACTIVE &&
             FAILED(endpoint.parent_lookup_error)) {
             ++readiness.active_unassociated_endpoint_count;
         }
-        if (same_id(endpoint.parent_device_id, instance_id)) {
+        if (same_id(endpoint.parent_device_id, instance.id)) {
             count_endpoint(endpoint, readiness.counts);
-            readiness.endpoints.push_back(std::move(endpoint));
+            readiness.endpoints.push_back(endpoint);
         }
     }
     readiness.state = classify(readiness);

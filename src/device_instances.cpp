@@ -261,7 +261,7 @@ Result add(const std::wstring& inf_path, const std::wstring& label, Instance& cr
     if (!result.ok) return result;
     if (current.size() >= kMaximumInstances) {
         return Result::failure(ERROR_TOO_MANY_NAMES,
-                               L"Driver currently supports one SAR instance; remove it first");
+                               L"Driver prototype instance limit reached; remove one first");
     }
     for (const Instance& item : current) {
         if (same_id(item.label, label)) {

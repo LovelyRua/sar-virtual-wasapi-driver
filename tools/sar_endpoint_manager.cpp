@@ -2,6 +2,7 @@
 
 #include "src/device_instances.h"
 #include "src/endpoint_readiness.h"
+#include "src/fleet_readiness.h"
 #include "src/wasapi_inventory.h"
 
 #include <windows.h>
@@ -31,8 +32,10 @@ void usage() {
         << L"  sar_endpoint_manager wait-endpoints <all|render|capture> <count> <timeout-ms>\n"
         << L"  sar_endpoint_manager diagnose <instance-id> [--json]\n"
         << L"  sar_endpoint_manager wait-ready <instance-id> <timeout-ms> [--json]\n"
+        << L"  sar_endpoint_manager fleet [--json]\n"
+        << L"  sar_endpoint_manager wait-fleet <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager help\n\n"
-        << L"Prototype limit: two instances, each with two stereo bus pairs.\n"
+        << L"Prototype limit: two instances, each with two fixed render/capture bus pairs.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
         << L"shared driver packages. It requires elevation for edits.\n";
 }
@@ -366,6 +369,58 @@ int diagnose(const std::wstring& instance_id, bool as_json, bool wait,
     return 1;
 }
 
+void print_fleet_json(const sar::devices::FleetReadiness& readiness) {
+    std::wcout << L"{\"state\":";
+    json_string(sar::devices::fleet_readiness_state_name(readiness.state));
+    std::wcout << L",\"ready\":" << (readiness.ready() ? L"true" : L"false")
+               << L",\"readyInstances\":" << readiness.ready_instances()
+               << L",\"instanceCount\":" << readiness.instances.size()
+               << L",\"stableSamples\":" << readiness.stable_samples
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(readiness.inventory_error)
+               << L",\"instances\":[";
+    for (size_t index = 0; index < readiness.instances.size(); ++index) {
+        if (index) std::wcout << L',';
+        print_readiness_json(readiness.instances[index]);
+    }
+    std::wcout << L"]}";
+}
+
+void print_fleet(const sar::devices::FleetReadiness& readiness) {
+    std::wcout << L"SAR fleet readiness: "
+               << sar::devices::fleet_readiness_state_name(readiness.state) << L'\n'
+               << L"  ready instances: " << readiness.ready_instances() << L" / "
+               << readiness.instances.size() << L'\n'
+               << L"  consecutive stable samples: " << readiness.stable_samples << L" / "
+               << sar::devices::kStableReadinessSamples << L'\n';
+    for (const auto& instance : readiness.instances) {
+        print_readiness(instance);
+    }
+}
+
+int fleet(bool wait, unsigned timeout_ms, bool as_json) {
+    sar::devices::FleetReadiness readiness;
+    const HRESULT result = wait
+        ? sar::devices::wait_for_fleet_readiness(timeout_ms, readiness)
+        : sar::devices::inspect_fleet_readiness(readiness);
+
+    if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) {
+        std::wcerr << L"Fleet readiness inspection failed: 0x" << std::hex
+                   << static_cast<unsigned long>(result) << std::dec << L'\n';
+        return 1;
+    }
+    if (as_json) {
+        print_fleet_json(readiness);
+        std::wcout << L'\n';
+    } else {
+        print_fleet(readiness);
+    }
+    if (readiness.ready()) return 0;
+    if (result == HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 3;
+    if (readiness.state == sar::devices::FleetReadinessState::no_instances) return 4;
+    return 1;
+}
+
 bool parse_timeout(const wchar_t* text, unsigned& timeout_ms) {
     if (!text || !*text) return false;
     wchar_t* end = nullptr;
@@ -487,6 +542,20 @@ int wmain(int argc, wchar_t** argv) {
         const bool as_json = argc == 5 && std::wcscmp(argv[4], L"--json") == 0;
         if (argc == 5 && !as_json) return 2;
         return diagnose(argv[2], as_json, true, timeout_ms);
+    }
+    if (argc == 2 && std::wcscmp(argv[1], L"fleet") == 0) {
+        return fleet(false, 0, false);
+    }
+    if (argc == 3 && std::wcscmp(argv[1], L"fleet") == 0 &&
+        std::wcscmp(argv[2], L"--json") == 0) {
+        return fleet(false, 0, true);
+    }
+    if ((argc == 3 || argc == 4) && std::wcscmp(argv[1], L"wait-fleet") == 0) {
+        unsigned timeout_ms = 0;
+        if (!parse_timeout(argv[2], timeout_ms)) return 2;
+        const bool as_json = argc == 4 && std::wcscmp(argv[3], L"--json") == 0;
+        if (argc == 4 && !as_json) return 2;
+        return fleet(true, timeout_ms, as_json);
     }
 
     if (argc == 4 && std::wcscmp(argv[1], L"add") == 0) {
