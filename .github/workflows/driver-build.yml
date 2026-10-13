@@ -146,6 +146,7 @@ jobs:
           $privateKeyPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.key'
           $privateKeyPfx = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pfx'
           $privateKeyPassword = [Guid]::NewGuid().ToString('N')
+          $env:SAR_LAB_PFX_PASSWORD = $privateKeyPassword
           try {
             Write-Host 'Generating a seven-day RSA code-signing certificate with OpenSSL'
             & $openSsl req -new -x509 -newkey rsa:2048 -sha256 -days 7 -nodes `
@@ -155,13 +156,17 @@ jobs:
               -addext 'keyUsage=critical,digitalSignature' `
               -addext 'extendedKeyUsage=codeSigning'
             if ($LASTEXITCODE -ne 0) { throw 'OpenSSL certificate generation failed' }
-            Write-Host 'Exporting the public certificate and temporary PKCS#12 key'
+            Write-Host 'Converting the public certificate to DER'
             & $openSsl x509 -in $certificatePemPath -outform DER -out $certificatePath
             if ($LASTEXITCODE -ne 0) { throw 'OpenSSL certificate export failed' }
+            Write-Host 'Exporting temporary PKCS#12 key without an interactive prompt'
             & $openSsl pkcs12 -export -out $privateKeyPfx -inkey $privateKeyPath `
-              -in $certificatePemPath -passout "pass:$privateKeyPassword"
+              -in $certificatePemPath -passout env:SAR_LAB_PFX_PASSWORD
             if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PKCS#12 export failed' }
+            Write-Host 'Importing public certificate into temporary root store'
             $certificate = Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\Root
+            if (-not $certificate) { throw 'Public certificate import returned no certificate' }
+            Write-Host 'Importing public certificate into temporary publisher store'
             Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
             Write-Host "Signing catalog with certificate $($certificate.Thumbprint)"
             & $signtool sign /v /fd SHA256 /f $privateKeyPfx /p $privateKeyPassword $catalogPath
@@ -181,6 +186,7 @@ jobs:
             foreach ($path in @($certificatePemPath, $privateKeyPath, $privateKeyPfx)) {
               Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
             }
+            Remove-Item Env:SAR_LAB_PFX_PASSWORD -ErrorAction SilentlyContinue
           }
 
       - name: Create lab artifact manifest
