@@ -1,6 +1,7 @@
 #include "src/wasapi_capture_continuity_gate.h"
 #include "src/wasapi_capture_continuity_tracker.h"
 #include "src/capture_signal_window_assembler.h"
+#include "src/signal_level_monitor.h"
 #include "src/signal_window_queue.h"
 
 #include <cstdint>
@@ -8,6 +9,20 @@
 int main() {
     sar_driver::CaptureTimelineStats clean{};
     if (!sar_driver::CaptureContinuityPassed(clean, 96000, 96000, 96000)) return 1;
+    sar_driver::SignalLevelMonitor saggedLevel;
+    saggedLevel.Observe({0.04, 0.04}, 1);
+    saggedLevel.Observe({0.04, 0.001}, 2);
+    if (saggedLevel.WithinSpread(1.0) ||
+        !sar_driver::CaptureContinuityPassed(clean, 96000, 96000, 96000)) return 28;
+    sar_driver::SignalLevelMonitor stableLevel;
+    stableLevel.Observe({0.04, 0.04}, 1);
+    stableLevel.Observe({0.04, 0.04}, 2);
+    auto gapWithStableLevel = clean;
+    gapWithStableLevel.position_gap_packets = 1;
+    gapWithStableLevel.position_gap_frames = 48;
+    if (!stableLevel.WithinSpread(1.0) ||
+        sar_driver::CaptureContinuityPassed(
+            gapWithStableLevel, 96000, 96000, 96000)) return 29;
     // Both scheduling arms must judge the same measured stream identically.
     const auto cleanArmA = sar_driver::CaptureContinuityFailures(clean, 96000, 96000, 96000);
     const auto cleanArmB = sar_driver::CaptureContinuityFailures(clean, 96000, 96000, 96000);

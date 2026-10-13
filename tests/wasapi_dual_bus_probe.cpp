@@ -372,13 +372,19 @@ public:
                 [this](const float* samples, std::size_t) {
                     const auto result = sar_driver::AnalyzeSignalWindow(
                         samples, sar_driver::kProbeRate, bus_);
-                    level_monitor_.Observe(result.expected_power);
+                    level_monitor_.Observe(result.expected_power, windows_ + 1);
                     ++windows_;
                     if (!result.passed()) ++failed_windows_;
                     const std::lock_guard<std::mutex> lock(g_analysis_output_mutex);
                     std::cout << "bus=" << bus_ << " window=" << windows_
                               << " left=" << result.expected_power[0]
                               << " right=" << result.expected_power[1]
+                              << " level_left_dbfs="
+                              << sar_driver::SignalLevelStats::power_dbfs(
+                                     result.expected_power[0])
+                              << " level_right_dbfs="
+                              << sar_driver::SignalLevelStats::power_dbfs(
+                                     result.expected_power[1])
                               << " channel_leak_left=" << result.wrong_channel_power[0]
                               << " channel_leak_right=" << result.wrong_channel_power[1]
                               << " bus_leak_left=" << result.other_bus_power[0]
@@ -486,11 +492,35 @@ public:
                   << " valid_level_windows=" << levels.valid_windows
                   << " invalid_level_windows=" << levels.invalid_windows
                   << " min_level_left_dbfs=" << levels.minimum_dbfs(0)
-                  << " max_level_left_dbfs=" << levels.maximum_dbfs(0)
-                  << " level_spread_left_db=" << levels.spread_db(0)
+                  << " min_level_left_window=";
+        if (levels.minimum_window[0] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.minimum_window[0];
+        }
+        std::cout << " max_level_left_dbfs=" << levels.maximum_dbfs(0)
+                  << " max_level_left_window=";
+        if (levels.maximum_window[0] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.maximum_window[0];
+        }
+        std::cout << " level_spread_left_db=" << levels.spread_db(0)
                   << " min_level_right_dbfs=" << levels.minimum_dbfs(1)
-                  << " max_level_right_dbfs=" << levels.maximum_dbfs(1)
-                  << " level_spread_right_db=" << levels.spread_db(1)
+                  << " min_level_right_window=";
+        if (levels.minimum_window[1] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.minimum_window[1];
+        }
+        std::cout << " max_level_right_dbfs=" << levels.maximum_dbfs(1)
+                  << " max_level_right_window=";
+        if (levels.maximum_window[1] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.maximum_window[1];
+        }
+        std::cout << " level_spread_right_db=" << levels.spread_db(1)
                   << " level_limit_db=" << maximum_level_spread_db_
                   << " level_passed=" << static_cast<int>(LevelPassed())
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()

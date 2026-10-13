@@ -237,6 +237,22 @@ bool test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() {
            options.endpoint_ids[0] == nullptr;
 }
 
+bool test_level_spread_inclusive_limits_and_default_reset() {
+    const std::array<const wchar_t*, 8> minimum{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"0.1"}};
+    const std::array<const wchar_t*, 8> maximum{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"60"}};
+    const std::array<const wchar_t*, 6> omitted{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(minimum.data(), static_cast<int>(minimum.size()), options) &&
+           options.maximum_level_spread_db == 0.1 &&
+           parse(maximum.data(), static_cast<int>(maximum.size()), options) &&
+           options.maximum_level_spread_db == 60.0 &&
+           parse(omitted.data(), static_cast<int>(omitted.size()), options) &&
+           options.maximum_level_spread_db == 0.0;
+}
+
 bool test_mmcss_is_enabled_by_default_and_can_be_disabled() {
     const std::array<const wchar_t*, 6> defaults{{L"probe", L"--single", L"0",
         L"render", L"capture", L"15"}};
@@ -306,6 +322,7 @@ int main() {
                    test_level_spread_limit_is_optional_and_bounded() &&
                    test_level_spread_suffix_works_for_legacy_and_multi_modes() &&
                    test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() &&
+                   test_level_spread_inclusive_limits_and_default_reset() &&
                    test_mmcss_is_enabled_by_default_and_can_be_disabled() &&
                    test_mmcss_and_level_suffixes_are_order_independent() &&
                    test_duplicate_or_malformed_optional_arguments_fail_closed() &&

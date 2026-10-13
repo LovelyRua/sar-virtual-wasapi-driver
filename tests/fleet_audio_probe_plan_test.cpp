@@ -124,6 +124,24 @@ bool test_endpoint_names_must_match_registered_instance_label() {
            plan.buses.empty();
 }
 
+bool test_endpoint_enumeration_order_does_not_change_bus_pairing() {
+    FleetAudioProbePlan plan;
+    auto input = fleet(2);
+    for (auto& member : input.instances) {
+        std::reverse(member.endpoints.begin(), member.endpoints.end());
+    }
+    return sar::devices::build_fleet_audio_probe_plan(input, plan) &&
+           plan.buses.size() == 4 &&
+           plan.buses[0].render_endpoint_id == L"render-speaker-0001" &&
+           plan.buses[0].capture_endpoint_id == L"capture-1-0001" &&
+           plan.buses[1].render_endpoint_id == L"render-headphone-0001" &&
+           plan.buses[1].capture_endpoint_id == L"capture-2-0001" &&
+           plan.buses[2].render_endpoint_id == L"render-speaker-0002" &&
+           plan.buses[2].capture_endpoint_id == L"capture-1-0002" &&
+           plan.buses[3].render_endpoint_id == L"render-headphone-0002" &&
+           plan.buses[3].capture_endpoint_id == L"capture-2-0002";
+}
+
 bool test_missing_or_ambiguous_expected_endpoint_is_rejected() {
     FleetAudioProbePlan plan;
     auto missing = fleet();
@@ -171,6 +189,7 @@ int main() {
                    test_unstable_or_unready_fleet_is_rejected() &&
                    test_endpoint_parent_must_match_instance() &&
                    test_endpoint_names_must_match_registered_instance_label() &&
+                   test_endpoint_enumeration_order_does_not_change_bus_pairing() &&
                    test_missing_or_ambiguous_expected_endpoint_is_rejected() &&
                    test_non_stereo_or_non_48khz_endpoint_is_rejected() &&
                    test_duplicate_endpoint_ids_across_instances_are_rejected_case_insensitively() &&

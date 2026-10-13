@@ -291,8 +291,12 @@ void TestLevelMonitorTracksCrossWindowSpread() {
     monitor.Observe({0.04, 0.04});
     monitor.Observe({0.02, 0.02});
     Expect(monitor.stats().valid_windows == 2 &&
-               monitor.stats().invalid_windows == 0,
+               monitor.stats().invalid_windows == 0 &&
+               monitor.stats().observed_windows == 2,
            "valid windows must contribute to the level summary");
+    Expect(monitor.stats().minimum_window[0] == 2 &&
+               monitor.stats().maximum_window[0] == 1,
+           "automatic window indices must identify the low and high level observations");
     Expect(monitor.WithinSpread(3.1), "a 3 dB power spread must pass a 3.1 dB limit");
     Expect(!monitor.WithinSpread(2.9), "level threshold must reject an undersized limit");
     const double spread = monitor.stats().spread_db(0);
@@ -318,14 +322,37 @@ void TestSingleChannelCaptureSagFailsLevelGate() {
            "the attenuated right channel remains above the content floor");
 
     sar_driver::SignalLevelMonitor monitor;
-    monitor.Observe(stable.expected_power);
-    monitor.Observe(sagged.expected_power);
+    monitor.Observe(stable.expected_power, 10);
+    monitor.Observe(sagged.expected_power, 22);
     Expect(monitor.stats().valid_windows == 2 && monitor.stats().invalid_windows == 0,
            "both stable and attenuated windows contribute to the level gate");
     Expect(monitor.stats().spread_db(0) < 0.01,
            "an isolated right-channel sag must not affect the left-channel range");
+    Expect(monitor.stats().minimum_window[0] == 10 &&
+               monitor.stats().minimum_window[1] == 22,
+           "minimum-level window must be tracked independently for each channel");
     Expect(monitor.stats().spread_db(1) > 19.0 && !monitor.WithinSpread(1.0),
            "a single-channel 20 dB capture sag must fail a 1 dB stability gate");
+}
+
+void TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie() {
+    sar_driver::SignalLevelMonitor monitor;
+    monitor.Observe({0.04, 0.03}, 4);
+    monitor.Observe({0.02, 0.03}, 8);
+    monitor.Observe({0.02, 0.01}, 9);
+    monitor.Observe({0.0, 0.04}, 10);
+    const auto& stats = monitor.stats();
+    Expect(stats.observed_windows == 4 && stats.valid_windows == 3 &&
+               stats.invalid_windows == 1,
+           "observed, valid, and invalid level-window counts must remain distinct");
+    Expect(stats.minimum_window[0] == 8 && stats.maximum_window[0] == 4,
+           "equal minimum values must retain the first window index");
+    Expect(stats.minimum_window[1] == 9 && stats.maximum_window[1] == 4,
+           "invalid windows must not replace valid per-channel extrema");
+    Expect(std::isinf(sar_driver::SignalLevelStats::power_dbfs(0.0)) &&
+               std::isinf(sar_driver::SignalLevelStats::power_dbfs(
+                   std::numeric_limits<double>::quiet_NaN())),
+           "zero or non-finite window power must map to negative infinity dBFS");
 }
 
 void TestInvalidLevelWindowDoesNotPoisonValidRange() {
@@ -364,6 +391,7 @@ int main() {
     TestSpectralAnalysisDoesNotProveTimelineContinuity();
     TestLevelMonitorTracksCrossWindowSpread();
     TestSingleChannelCaptureSagFailsLevelGate();
+    TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie();
     TestInvalidLevelWindowDoesNotPoisonValidRange();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);

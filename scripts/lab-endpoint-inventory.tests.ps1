@@ -44,8 +44,16 @@ try {
     }
     Set-Content -LiteralPath $reportPath -Value '{"Passed":true}' -Encoding UTF8
     Set-Content -LiteralPath $inventory -Value "Render endpoints:`n  Broken endpoint`nCapture endpoints:" -Encoding UTF8
-    $failedOutput = & $shell -NoProfile -File $checker -InventoryPath $inventory -ReportPath $reportPath 2>&1
-    if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $reportPath)) {
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $failedOutput = & $shell -NoProfile -File $checker `
+            -InventoryPath $inventory -ReportPath $reportPath 2>&1
+        $failedExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($failedExitCode -eq 0 -or (Test-Path -LiteralPath $reportPath)) {
         throw "Malformed inventory left a stale report or succeeded: $failedOutput"
     }
     Write-Output 'lab_endpoint_inventory_tests passed=5'
