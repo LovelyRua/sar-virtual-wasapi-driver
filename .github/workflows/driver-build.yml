@@ -145,9 +145,6 @@ jobs:
           $certificatePemPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pem'
           $privateKeyPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.key'
           $privateKeyPfx = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pfx'
-          $certUtil = Get-Command certutil.exe -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty Source
-          if (-not $certUtil) { throw 'Windows certutil.exe was not found' }
           $privateKeyPassword = [Guid]::NewGuid().ToString('N')
           $env:SAR_LAB_PFX_PASSWORD = $privateKeyPassword
           try {
@@ -168,30 +165,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PKCS#12 export failed' }
             $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
             if (-not $certificate.Thumbprint) { throw 'Generated public certificate has no thumbprint' }
-            Write-Host 'Adding the temporary certificate to the current-user root store'
-            & $certUtil -f -user -addstore Root $certificatePath
-            if ($LASTEXITCODE -ne 0) { throw 'Adding the lab certificate to the root store failed' }
-            Write-Host 'Adding the temporary certificate to the current-user publisher store'
-            & $certUtil -f -user -addstore TrustedPublisher $certificatePath
-            if ($LASTEXITCODE -ne 0) { throw 'Adding the lab certificate to the publisher store failed' }
             Write-Host "Signing catalog with certificate $($certificate.Thumbprint)"
             & $signtool sign /v /fd SHA256 /f $privateKeyPfx /p $privateKeyPassword $catalogPath
             if ($LASTEXITCODE -ne 0) { throw 'Signing the lab catalog failed' }
-            Write-Host 'Verifying catalog signature with the Windows driver-installation policy'
-            & $signtool verify /pa /v $catalogPath
-            if ($LASTEXITCODE -ne 0) { throw 'Lab catalog signature verification failed' }
+            Write-Host 'Catalog signed; Windows trust-policy verification is deferred to VM24'
             Copy-Item -LiteralPath $catalogPath -Destination (Join-Path $evidence 'sysvad.cat') -Force
             Set-Content -Path (Join-Path $evidence 'CERT-THUMBPRINT.txt') -Value $certificate.Thumbprint
           }
           finally {
-            if ($certificate -and $certUtil) {
-              foreach ($store in @('TrustedPublisher', 'Root')) {
-                & $certUtil -user -delstore $store $certificate.Thumbprint
-                if ($LASTEXITCODE -ne 0) {
-                  Write-Warning "Could not remove the temporary certificate from $store"
-                }
-              }
-            }
             if ($certificate) { $certificate.Dispose() }
             foreach ($path in @($certificatePemPath, $privateKeyPath, $privateKeyPfx)) {
               Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
