@@ -100,11 +100,15 @@ try {
     Start-ScheduledTask -TaskName $taskName
     $deadline = (Get-Date).AddSeconds($DurationSeconds + 30)
     do {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $reportExists = Test-Path -LiteralPath $OutputPath
+        if ($reportExists -and ($null -eq $task -or $task.State -ne 'Running')) { break }
+        if ((Get-Date) -ge $deadline) {
+            if ($null -eq $task) { throw 'Interactive task disappeared before writing a probe report.' }
+            throw 'Interactive probe timed out.'
+        }
         Start-Sleep -Milliseconds 500
-        $task = Get-ScheduledTask -TaskName $taskName
-    } while (($task.State -eq 'Running' -or -not (Test-Path -LiteralPath $OutputPath)) -and
-             (Get-Date) -lt $deadline)
-    if ((Get-Date) -ge $deadline) { throw 'Interactive probe timed out.' }
+    } while ($true)
     if (-not (Test-Path -LiteralPath $OutputPath)) {
         throw "Interactive task completed without a probe report: $((Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult)"
     }

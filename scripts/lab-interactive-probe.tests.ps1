@@ -28,6 +28,7 @@ function Assert-Rejected([hashtable] $Arguments, [string] $ExpectedMessage) {
 
 try {
     $global:SarCapturedActionArgument = $null
+    $global:SarTaskDisappears = $false
     function New-ScheduledTaskAction {
         param([string] $Execute, [string] $Argument)
         [pscustomobject]@{ Execute = $Execute; Argument = $Argument }
@@ -45,7 +46,12 @@ try {
         $global:SarCapturedActionArgument = $Action.Argument
     }
     function Start-ScheduledTask { Set-Content -LiteralPath $reportPath -Value 'PROBE_EXIT=0' }
-    function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
+    function Get-ScheduledTask {
+        [CmdletBinding()]
+        param([string] $TaskName)
+        if ($global:SarTaskDisappears) { return $null }
+        [pscustomobject]@{ State = 'Ready' }
+    }
     function Unregister-ScheduledTask {}
     function Get-Process { [pscustomobject]@{ SessionId = 1 } }
 
@@ -58,6 +64,13 @@ try {
     $missingPair = $base.Clone()
     $missingPair.Mode = 'dual_bus'
     Assert-Rejected $missingPair 'dual_bus mode requires RenderId2 and CaptureId2.'
+
+    $global:SarTaskDisappears = $true
+    $completedAfterTaskRemoval = @(& $scriptPath @base)
+    $global:SarTaskDisappears = $false
+    if ($completedAfterTaskRemoval -notcontains 'PROBE_EXIT=0') {
+        throw 'Launcher did not accept a completed report after the scheduled task disappeared.'
+    }
 
     $singleWithExtra = $base.Clone()
     $singleWithExtra.RenderId2 = $validRender2
@@ -205,7 +218,7 @@ try {
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=20'
+    Write-Output 'lab_interactive_probe_tests passed=21'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
