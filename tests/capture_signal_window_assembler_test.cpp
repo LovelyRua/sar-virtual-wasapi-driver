@@ -52,12 +52,44 @@ bool repeated_breaks_count_only_frames_actually_discarded() {
            assembler.pending_frames() == 0 && assembler.completed_windows() == 0;
 }
 
+bool full_queue_rejects_a_complete_window_and_recovers_cleanly() {
+    Queue queue;
+    Assembler assembler;
+    const auto append_window = [&](float value) {
+        bool completed = false;
+        for (int frame = 0; frame < 3; ++frame) {
+            completed = assembler.AppendFrame(value, -value, queue);
+        }
+        return completed;
+    };
+    if (!append_window(1.0f) || !append_window(2.0f) || !append_window(3.0f) ||
+        append_window(4.0f)) return false;
+    if (assembler.completed_windows() != 4 || assembler.rejected_windows() != 1 ||
+        assembler.pending_frames() != 0 || queue.queued_windows() != 3) return false;
+
+    const auto consume_value = [&](float expected) {
+        bool matches = false;
+        const bool consumed = queue.try_consume_one(
+            [&](const float* samples, std::size_t count) {
+                matches = count == 6 && samples[0] == expected &&
+                          samples[2] == expected && samples[4] == expected &&
+                          samples[1] == -expected && samples[5] == -expected;
+            });
+        return consumed && matches;
+    };
+    if (!consume_value(1.0f) || !append_window(5.0f) ||
+        assembler.rejected_windows() != 1 || queue.queued_windows() != 3) return false;
+    return consume_value(2.0f) && consume_value(3.0f) && consume_value(5.0f) &&
+           queue.queued_windows() == 0 && assembler.completed_windows() == 5;
+}
+
 }  // namespace
 
 int main() {
     return incomplete_segment_is_discarded_before_new_audio() &&
                    empty_break_is_free_and_does_not_shift_window_boundaries() &&
-                   repeated_breaks_count_only_frames_actually_discarded()
+                   repeated_breaks_count_only_frames_actually_discarded() &&
+                   full_queue_rejects_a_complete_window_and_recovers_cleanly()
                ? 0
                : 1;
 }

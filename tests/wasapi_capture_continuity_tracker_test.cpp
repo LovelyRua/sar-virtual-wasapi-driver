@@ -1,6 +1,8 @@
 #include "src/wasapi_capture_continuity_tracker.h"
 #include "src/wasapi_capture_continuity_gate.h"
 
+#include <limits>
+
 namespace {
 
 bool startup_packets_are_excluded_from_measured_continuity() {
@@ -117,6 +119,20 @@ bool measured_qpc_regression_is_retained_after_warmup() {
            tracker.measured_frames() == 960;
 }
 
+bool warmup_position_overflow_fails_closed_without_a_false_gap() {
+    sar_driver::WasapiCaptureContinuityTracker tracker(48000, 1);
+    const auto overflow = tracker.Observe(
+        std::numeric_limits<std::uint64_t>::max(), 1000000, 2,
+        false, false, false);
+    if (!overflow.segment_break || overflow.warmup_frames != 1 ||
+        overflow.measured_frames != 1 || tracker.measured_frames() != 1 ||
+        tracker.stats().timestamp_error_packets != 1) return false;
+    const auto recovered = tracker.Observe(0, 1100000, 1, false, false, false);
+    return !recovered.segment_break && tracker.stats().packets == 2 &&
+           tracker.stats().timestamp_error_packets == 1 &&
+           tracker.stats().position_gap_packets == 0;
+}
+
 }  // namespace
 
 int main() {
@@ -129,7 +145,8 @@ int main() {
                    warmup_discontinuity_is_excluded_but_boundary_discontinuity_is_retained() &&
                    measured_qpc_regression_is_retained_after_warmup() &&
                    tracker_preserves_breaks_after_warmup_clipping() &&
-                   timestamp_and_silent_packets_break_analysis_segments()
+                   timestamp_and_silent_packets_break_analysis_segments() &&
+                   warmup_position_overflow_fails_closed_without_a_false_gap()
                ? 0
                : 1;
 }

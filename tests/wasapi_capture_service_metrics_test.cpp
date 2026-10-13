@@ -112,5 +112,18 @@ int main() {
         !sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
         return 12;
     }
+
+    sar_driver::WasapiCaptureServiceMetrics unknownPeriod;
+    unknownPeriod.BeginPass();
+    unknownPeriod.ObservePacket(100, 1000100, 0);
+    unknownPeriod.ObservePacket(1000200, 1000100, 0);
+    unknownPeriod.EndPass();
+    if (unknownPeriod.stats().packets != 2 ||
+        unknownPeriod.stats().packets_with_valid_timestamp != 1 ||
+        unknownPeriod.stats().packets_with_future_timestamp != 1 ||
+        unknownPeriod.stats().total_timestamp_age_100ns != 1000000 ||
+        unknownPeriod.stats().maximum_timestamp_age_100ns != 1000000 ||
+        unknownPeriod.stats().packets_over_late_threshold != 0 ||
+        unknownPeriod.stats().maximum_packets_per_pass != 2) return 13;
     return 0;
 }

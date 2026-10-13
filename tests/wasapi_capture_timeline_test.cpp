@@ -137,6 +137,18 @@ bool test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range() {
            timeline.stats().packets == 2;
 }
 
+bool test_44100hz_fractional_qpc_ticks_remain_contiguous() {
+    WasapiCaptureTimeline timeline;
+    for (std::uint64_t position = 0; position <= 441; ++position) {
+        const auto qpc = position * WasapiCaptureTimeline::kQpcUnitsPerSecond / 44100;
+        timeline.Observe(position, qpc, 1, 44100, false, false, false);
+    }
+    return timeline.stats().packets == 442 &&
+           timeline.stats().position_gap_packets == 0 &&
+           timeline.stats().position_overlap_packets == 0 &&
+           timeline.stats().maximum_qpc_delta_error_100ns <= 1;
+}
+
 bool test_discontinuity_is_not_hidden_by_contiguous_followup_packets() {
     WasapiCaptureTimeline timeline;
     timeline.Observe(0, 0, 480, 48000, false, false, false);
@@ -204,7 +216,8 @@ int main() {
                    test_silent_packets_are_counted_independently_of_discontinuities() &&
                    test_maximum_gap_reports_the_largest_single_event() &&
                    test_segment_break_reports_flags_gaps_and_overlaps() &&
-                   test_qpc_drift_is_not_a_segment_break_but_regression_is()
+                   test_qpc_drift_is_not_a_segment_break_but_regression_is() &&
+                   test_44100hz_fractional_qpc_ticks_remain_contiguous()
                ? 0
                : 1;
 }

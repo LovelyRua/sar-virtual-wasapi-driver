@@ -320,6 +320,9 @@ void TestInvalidLevelWindowDoesNotPoisonValidRange() {
            "out-of-range channel queries must fail closed");
     Expect(!monitor.WithinSpread(std::numeric_limits<double>::quiet_NaN()),
            "non-finite level limits must fail closed");
+    Expect(!monitor.WithinSpread(0.0) && !monitor.WithinSpread(-1.0) &&
+               !monitor.WithinSpread(std::numeric_limits<double>::infinity()),
+           "zero, negative, and infinite spread limits must fail closed");
 }
 
 } // namespace
