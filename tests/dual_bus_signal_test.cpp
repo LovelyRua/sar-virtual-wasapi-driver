@@ -1,6 +1,7 @@
 #include "src/dual_bus_signal.h"
 #include "src/wasapi_capture_continuity_gate.h"
 #include "src/signal_level_monitor.h"
+#include "src/signal_rms_window_analyzer.h"
 
 #include <array>
 #include <cmath>
@@ -335,6 +336,32 @@ void TestSingleChannelCaptureSagFailsLevelGate() {
            "a single-channel 20 dB capture sag must fail a 1 dB stability gate");
 }
 
+void TestSubsecondSagInsidePassingSpectralWindow() {
+    auto samples = MakeWindow(1);
+    constexpr unsigned sagStart = kProbeRate / 10;
+    constexpr unsigned sagEnd = sagStart * 2;
+    for (unsigned frame = sagStart; frame < sagEnd; ++frame) {
+        samples[frame * 2] *= 0.1f;
+    }
+    const auto fullSecond = AnalyzeSignalWindow(samples.data(), kProbeRate, 1);
+    Expect(fullSecond.passed(),
+           "a brief single-channel sag may still pass full-second tone classification");
+
+    sar_driver::SignalRmsWindowAnalyzer<kProbeRate / 10> shortWindows;
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        shortWindows.AppendFrame(samples[frame * 2], samples[frame * 2 + 1]);
+    }
+    const auto& stats = shortWindows.stats();
+    Expect(stats.valid_windows == 10 && stats.invalid_windows == 0,
+           "one second of capture must produce ten valid 100 ms RMS windows");
+    Expect(stats.minimum_window[0] == 2,
+           "subsecond RMS windows must localize the attenuated left interval");
+    Expect(stats.spread_db(0) > 3.0 && stats.spread_db(1) < 0.1,
+           "100 ms RMS range must expose a short left-channel sag without implicating right");
+    Expect(!shortWindows.WithinSpread(1.0),
+           "strict level stability must fail when an otherwise valid short window sags");
+}
+
 void TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie() {
     sar_driver::SignalLevelMonitor monitor;
     monitor.Observe({0.04, 0.03}, 4);
@@ -393,6 +420,7 @@ int main() {
     TestSingleChannelCaptureSagFailsLevelGate();
     TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie();
     TestInvalidLevelWindowDoesNotPoisonValidRange();
+    TestSubsecondSagInsidePassingSpectralWindow();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;

@@ -15,6 +15,7 @@
 #include "src/wasapi_capture_continuity_gate.h"
 #include "src/mmcss_audio_thread.h"
 #include "src/signal_level_monitor.h"
+#include "src/signal_rms_window_analyzer.h"
 #include "src/wasapi_probe_options.h"
 
 #include <algorithm>
@@ -124,6 +125,8 @@ public:
     using AnalysisQueue = sar_driver::SignalWindowQueue<
         sar_driver::kProbeRate, sar_driver::kProbeChannels, 4>;
     using WindowAssembler = sar_driver::CaptureSignalWindowAssembler<AnalysisQueue>;
+    using ShortLevelAnalyzer = sar_driver::SignalRmsWindowAnalyzer<
+        sar_driver::kProbeRate / 10>;
 
     ~StreamPair() {
         Stop();
@@ -312,6 +315,7 @@ public:
             if (continuityPacket.segment_break) {
                 ++analysis_segment_breaks_;
                 window_assembler_.DiscardPartialSegment();
+                short_level_analyzer_.DiscardPartialSegment();
             }
             ++capturePackets_;
             if (frames > maximumPacketFrames_) maximumPacketFrames_ = frames;
@@ -334,9 +338,9 @@ public:
                         value = reinterpret_cast<const std::int16_t*>(bytes)
                                     [frame * 2 + channel] / 32768.0f;
                     }
-                    if (!std::isfinite(value)) value = 0.0f;
                     frame_samples[channel] = value;
                 }
+                short_level_analyzer_.AppendFrame(frame_samples[0], frame_samples[1]);
                 if (window_assembler_.AppendFrame(
                         frame_samples[0], frame_samples[1], analysis_queue_)) {
                     if (!SetEvent(analysis_event_)) {
@@ -415,7 +419,13 @@ public:
 
     bool LevelPassed() const {
         return maximum_level_spread_db_ <= 0.0 ||
-               level_monitor_.WithinSpread(maximum_level_spread_db_);
+               (level_monitor_.WithinSpread(maximum_level_spread_db_) &&
+                ShortLevelPassed());
+    }
+
+    bool ShortLevelPassed() const {
+        return maximum_level_spread_db_ <= 0.0 ||
+               short_level_analyzer_.WithinSpread(maximum_level_spread_db_);
     }
 
     bool ContinuityPassed(unsigned seconds) const {
@@ -433,6 +443,7 @@ public:
         const auto meanPacketAge = service.packets_with_valid_timestamp == 0 ? 0 :
             service.total_timestamp_age_100ns / service.packets_with_valid_timestamp;
         const auto& levels = level_monitor_.stats();
+        const auto& shortLevels = short_level_analyzer_.stats();
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
@@ -521,6 +532,28 @@ public:
             std::cout << levels.maximum_window[1];
         }
         std::cout << " level_spread_right_db=" << levels.spread_db(1)
+                  << " short_level_window_frames=" << sar_driver::kProbeRate / 10
+                  << " short_level_valid_windows=" << shortLevels.valid_windows
+                  << " short_level_invalid_windows=" << shortLevels.invalid_windows
+                  << " short_level_discarded_frames="
+                  << short_level_analyzer_.discarded_segment_frames()
+                  << " short_level_min_left_dbfs=" << shortLevels.minimum_dbfs(0)
+                  << " short_level_min_left_window=";
+        if (shortLevels.minimum_window[0] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << shortLevels.minimum_window[0];
+        }
+        std::cout << " short_level_spread_left_db=" << shortLevels.spread_db(0)
+                  << " short_level_min_right_dbfs=" << shortLevels.minimum_dbfs(1)
+                  << " short_level_min_right_window=";
+        if (shortLevels.minimum_window[1] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << shortLevels.minimum_window[1];
+        }
+        std::cout << " short_level_spread_right_db=" << shortLevels.spread_db(1)
+                  << " short_level_passed=" << static_cast<int>(ShortLevelPassed())
                   << " level_limit_db=" << maximum_level_spread_db_
                   << " level_passed=" << static_cast<int>(LevelPassed())
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()
@@ -559,6 +592,7 @@ private:
     std::uint64_t qpc_frequency_ = 0;
     AnalysisQueue analysis_queue_;
     WindowAssembler window_assembler_;
+    ShortLevelAnalyzer short_level_analyzer_;
     HANDLE analysis_event_ = nullptr;
     std::thread analyzer_;
     std::atomic_bool stop_analyzer_{false};

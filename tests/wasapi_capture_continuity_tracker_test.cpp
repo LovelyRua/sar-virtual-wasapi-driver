@@ -1,6 +1,8 @@
 #include "src/wasapi_capture_continuity_tracker.h"
 #include "src/wasapi_capture_continuity_gate.h"
+#include "src/signal_rms_window_analyzer.h"
 
+#include <cmath>
 #include <limits>
 
 namespace {
@@ -152,6 +154,27 @@ bool warmup_position_overflow_fails_closed_without_a_false_gap() {
            tracker.stats().position_gap_packets == 0;
 }
 
+bool short_level_windows_begin_only_after_capture_warmup() {
+    sar_driver::WasapiCaptureContinuityTracker tracker(4, 4);
+    sar_driver::SignalRmsWindowAnalyzer<4> levels;
+    auto packet = tracker.Observe(0, 1000000, 4, false, false, false);
+    for (unsigned frame = 0; frame < 4; ++frame) {
+        if (packet.warmup_frames != 0) --packet.warmup_frames;
+        else levels.AppendFrame(0.0f, 0.0f);
+    }
+    if (levels.completed_windows() != 0 || tracker.measured_frames() != 0) return false;
+    packet = tracker.Observe(4, 11000000, 4, false, false, false);
+    for (unsigned frame = 0; frame < 4; ++frame) {
+        if (packet.warmup_frames != 0) --packet.warmup_frames;
+        else levels.AppendFrame(0.25f, -0.5f);
+    }
+    const auto& stats = levels.stats();
+    return tracker.measured_frames() == 4 && !packet.segment_break &&
+           levels.completed_windows() == 1 && stats.valid_windows == 1 &&
+           std::abs(stats.minimum_power[0] - 0.0625) < 1e-9 &&
+           std::abs(stats.minimum_power[1] - 0.25) < 1e-9;
+}
+
 }  // namespace
 
 int main() {
@@ -166,7 +189,8 @@ int main() {
                    measured_qpc_regression_is_retained_after_warmup() &&
                    tracker_preserves_breaks_after_warmup_clipping() &&
                    timestamp_and_silent_packets_break_analysis_segments() &&
-                   warmup_position_overflow_fails_closed_without_a_false_gap()
+                   warmup_position_overflow_fails_closed_without_a_false_gap() &&
+                   short_level_windows_begin_only_after_capture_warmup()
                ? 0
                : 1;
 }

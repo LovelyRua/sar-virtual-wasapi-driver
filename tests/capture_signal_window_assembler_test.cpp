@@ -1,5 +1,8 @@
 #include "src/capture_signal_window_assembler.h"
 #include "src/signal_window_queue.h"
+#include "src/signal_rms_window_analyzer.h"
+
+#include <cmath>
 
 namespace {
 
@@ -85,13 +88,27 @@ bool full_queue_rejects_a_complete_window_and_recovers_cleanly() {
            queue.queued_windows() == 0 && assembler.completed_windows() == 5;
 }
 
+bool short_level_windows_do_not_join_audio_across_a_segment_break() {
+    sar_driver::SignalRmsWindowAnalyzer<4> analyzer;
+    analyzer.AppendFrame(0.8f, 0.8f);
+    analyzer.AppendFrame(0.8f, 0.8f);
+    if (!analyzer.DiscardPartialSegment()) return false;
+    for (int frame = 0; frame < 4; ++frame) analyzer.AppendFrame(0.2f, 0.4f);
+    const auto& stats = analyzer.stats();
+    return analyzer.discarded_segment_frames() == 2 &&
+           analyzer.completed_windows() == 1 && stats.valid_windows == 1 &&
+           std::abs(stats.minimum_power[0] - 0.04) < 1e-8 &&
+           std::abs(stats.minimum_power[1] - 0.16) < 1e-8;
+}
+
 }  // namespace
 
 int main() {
     return incomplete_segment_is_discarded_before_new_audio() &&
                    empty_break_is_free_and_does_not_shift_window_boundaries() &&
                    repeated_breaks_count_only_frames_actually_discarded() &&
-                   full_queue_rejects_a_complete_window_and_recovers_cleanly()
+                   full_queue_rejects_a_complete_window_and_recovers_cleanly() &&
+                   short_level_windows_do_not_join_audio_across_a_segment_break()
                ? 0
                : 1;
 }

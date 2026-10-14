@@ -3,6 +3,7 @@
 #include "src/capture_signal_window_assembler.h"
 #include "src/signal_level_monitor.h"
 #include "src/signal_window_queue.h"
+#include "src/signal_rms_window_analyzer.h"
 
 #include <cstdint>
 
@@ -14,6 +15,11 @@ int main() {
     saggedLevel.Observe({0.04, 0.001}, 2);
     if (saggedLevel.WithinSpread(1.0) ||
         !sar_driver::CaptureContinuityPassed(clean, 96000, 96000, 96000)) return 28;
+    sar_driver::SignalRmsWindowAnalyzer<4> shortSag;
+    for (int frame = 0; frame < 4; ++frame) shortSag.AppendFrame(0.2f, 0.2f);
+    for (int frame = 0; frame < 4; ++frame) shortSag.AppendFrame(0.05f, 0.2f);
+    if (shortSag.stats().spread_db(0) < 12.0 ||
+        !sar_driver::CaptureContinuityPassed(clean, 96000, 96000, 96000)) return 30;
     sar_driver::SignalLevelMonitor stableLevel;
     stableLevel.Observe({0.04, 0.04}, 1);
     stableLevel.Observe({0.04, 0.04}, 2);
