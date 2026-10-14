@@ -418,9 +418,12 @@ public:
     }
 
     bool LevelPassed() const {
+        return ShortLevelPassed();
+    }
+
+    bool ToneLevelPassed() const {
         return maximum_level_spread_db_ <= 0.0 ||
-               (level_monitor_.WithinSpread(maximum_level_spread_db_) &&
-                ShortLevelPassed());
+               level_monitor_.WithinSpread(maximum_level_spread_db_);
     }
 
     bool ShortLevelPassed() const {
@@ -554,6 +557,7 @@ public:
         }
         std::cout << " short_level_spread_right_db=" << shortLevels.spread_db(1)
                   << " short_level_passed=" << static_cast<int>(ShortLevelPassed())
+                  << " tone_level_passed=" << static_cast<int>(ToneLevelPassed())
                   << " level_limit_db=" << maximum_level_spread_db_
                   << " level_passed=" << static_cast<int>(LevelPassed())
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()

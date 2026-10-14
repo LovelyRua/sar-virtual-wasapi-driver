@@ -362,6 +362,41 @@ void TestSubsecondSagInsidePassingSpectralWindow() {
            "strict level stability must fail when an otherwise valid short window sags");
 }
 
+void TestPhaseStepDoesNotMasqueradeAsLevelSag() {
+    auto stable = MakeWindow(1);
+    auto phaseStepped = stable;
+    constexpr unsigned phaseStepFrame = kProbeRate / 2;
+    constexpr double phaseStep = 1.2;
+    constexpr unsigned frequency = sar_driver::kProbeFrequencies[1][0];
+    for (unsigned frame = phaseStepFrame; frame < kProbeRate; ++frame) {
+        const double phase = 2.0 * sar_driver::kProbePi * frequency * frame /
+                                 kProbeRate +
+                             phaseStep;
+        phaseStepped[frame * 2] = static_cast<float>(std::sin(phase) * 0.28);
+    }
+
+    const auto stableSignal = AnalyzeSignalWindow(stable.data(), kProbeRate, 1);
+    const auto steppedSignal = AnalyzeSignalWindow(phaseStepped.data(), kProbeRate, 1);
+    Expect(stableSignal.passed() && steppedSignal.passed(),
+           "a phase step must preserve valid bus content and channel isolation");
+
+    sar_driver::SignalLevelMonitor toneLevels;
+    toneLevels.Observe(stableSignal.expected_power, 1);
+    toneLevels.Observe(steppedSignal.expected_power, 2);
+    Expect(toneLevels.stats().spread_db(0) > 1.0 && !toneLevels.WithinSpread(1.0),
+           "single-bin tone power must retain phase-sensitive diagnostic evidence");
+
+    sar_driver::SignalRmsWindowAnalyzer<kProbeRate / 10> shortLevels;
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        shortLevels.AppendFrame(phaseStepped[frame * 2], phaseStepped[frame * 2 + 1]);
+    }
+    Expect(shortLevels.stats().valid_windows == 10 &&
+               shortLevels.stats().spread_db(0) < 0.1 &&
+               shortLevels.stats().spread_db(1) < 0.1 &&
+               shortLevels.WithinSpread(1.0),
+           "constant-amplitude phase steps must pass the short-window RMS level gate");
+}
+
 void TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie() {
     sar_driver::SignalLevelMonitor monitor;
     monitor.Observe({0.04, 0.03}, 4);
@@ -421,6 +456,7 @@ int main() {
     TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie();
     TestInvalidLevelWindowDoesNotPoisonValidRange();
     TestSubsecondSagInsidePassingSpectralWindow();
+    TestPhaseStepDoesNotMasqueradeAsLevelSag();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;
