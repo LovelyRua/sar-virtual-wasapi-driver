@@ -46,8 +46,10 @@ public:
         return monitor_.stats();
     }
 
-    [[nodiscard]] bool WithinSpread(double maximum_spread_db) const noexcept {
-        return monitor_.WithinSpread(maximum_spread_db);
+    [[nodiscard]] bool WithinSpread(
+        double maximum_spread_db,
+        std::size_t minimum_valid_windows = 1) const noexcept {
+        return monitor_.WithinSpread(maximum_spread_db, minimum_valid_windows);
     }
 
     [[nodiscard]] std::size_t pending_frames() const noexcept {

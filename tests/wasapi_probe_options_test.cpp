@@ -206,7 +206,8 @@ bool test_level_spread_limit_is_optional_and_bounded() {
         L"render", L"capture", L"15", L"--max-level-spread-db", L"nan"}};
     sar_driver::WasapiProbeOptions options;
     if (!parse(enabled.data(), static_cast<int>(enabled.size()), options) ||
-        options.maximum_level_spread_db != 6.5 || options.pair_count != 1) return false;
+        options.maximum_level_spread_db != 6.5 || options.pair_count != 1 ||
+        options.minimum_level_windows != 130) return false;
     if (parse(too_small.data(), static_cast<int>(too_small.size()), options) ||
         options.maximum_level_spread_db != 0.0 || options.pair_count != 0) return false;
     if (parse(too_large.data(), static_cast<int>(too_large.size()), options) ||
@@ -222,8 +223,10 @@ bool test_level_spread_suffix_works_for_legacy_and_multi_modes() {
     sar_driver::WasapiProbeOptions options;
     return parse(legacy.data(), static_cast<int>(legacy.size()), options) &&
            options.pair_count == 2 && options.maximum_level_spread_db == 12.0 &&
+           options.minimum_level_windows == 130 &&
            parse(multi.data(), static_cast<int>(multi.size()), options) &&
-           options.pair_count == 2 && options.maximum_level_spread_db == 12.0;
+           options.pair_count == 2 && options.maximum_level_spread_db == 12.0 &&
+           options.minimum_level_windows == 130;
 }
 
 bool test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() {
@@ -247,10 +250,13 @@ bool test_level_spread_inclusive_limits_and_default_reset() {
     sar_driver::WasapiProbeOptions options;
     return parse(minimum.data(), static_cast<int>(minimum.size()), options) &&
            options.maximum_level_spread_db == 0.1 &&
+           options.minimum_level_windows == 130 &&
            parse(maximum.data(), static_cast<int>(maximum.size()), options) &&
            options.maximum_level_spread_db == 60.0 &&
+           options.minimum_level_windows == 130 &&
            parse(omitted.data(), static_cast<int>(omitted.size()), options) &&
-           options.maximum_level_spread_db == 0.0;
+           options.maximum_level_spread_db == 0.0 &&
+           options.minimum_level_windows == 0;
 }
 
 bool test_mmcss_is_enabled_by_default_and_can_be_disabled() {

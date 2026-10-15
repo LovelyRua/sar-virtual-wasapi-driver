@@ -22,6 +22,17 @@ else()
 endif()
 add_test(NAME dual_bus_signal_test COMMAND dual_bus_signal_test)
 
+add_executable(signal_level_coverage_policy_test
+  tests/signal_level_coverage_policy_test.cpp)
+target_compile_features(signal_level_coverage_policy_test PRIVATE cxx_std_17)
+target_include_directories(signal_level_coverage_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(signal_level_coverage_policy_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(signal_level_coverage_policy_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME signal_level_coverage_policy_test COMMAND signal_level_coverage_policy_test)
+
 add_executable(signal_rms_window_analyzer_test
   tests/signal_rms_window_analyzer_test.cpp)
 target_compile_features(signal_rms_window_analyzer_test PRIVATE cxx_std_17)

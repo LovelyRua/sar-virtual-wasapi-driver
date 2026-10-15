@@ -93,9 +93,13 @@ public:
 
     [[nodiscard]] const SignalLevelStats& stats() const noexcept { return stats_; }
 
-    [[nodiscard]] bool WithinSpread(double maximum_spread_db) const noexcept {
+    [[nodiscard]] bool WithinSpread(
+        double maximum_spread_db,
+        std::size_t minimum_valid_windows = 1) const noexcept {
         return std::isfinite(maximum_spread_db) && maximum_spread_db > 0.0 &&
-               stats_.valid_windows != 0 && stats_.invalid_windows == 0 &&
+               minimum_valid_windows != 0 &&
+               stats_.valid_windows >= minimum_valid_windows &&
+               stats_.invalid_windows == 0 &&
                stats_.spread_db(0) <= maximum_spread_db &&
                stats_.spread_db(1) <= maximum_spread_db;
     }

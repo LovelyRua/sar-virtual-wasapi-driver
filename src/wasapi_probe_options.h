@@ -1,5 +1,7 @@
 #pragma once
 
+#include "signal_level_coverage_policy.h"
+
 #include <array>
 #include <cstddef>
 #include <string>
@@ -15,6 +17,7 @@ struct WasapiProbeOptions {
     unsigned first_bus = 0;
     std::size_t pair_count = 0;
     double maximum_level_spread_db = 0.0;
+    std::size_t minimum_level_windows = 0;
     bool enable_mmcss = true;
     std::array<const wchar_t*, kMaximumProbeBuses * 2> endpoint_ids{};
 };

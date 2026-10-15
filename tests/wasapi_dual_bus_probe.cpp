@@ -206,6 +206,10 @@ public:
         maximum_level_spread_db_ = value;
     }
 
+    void SetMinimumLevelWindows(std::size_t value) {
+        minimum_level_windows_ = value;
+    }
+
     void StopAnalyzer() noexcept {
         if (analyzer_.joinable()) {
             stop_analyzer_.store(true, std::memory_order_release);
@@ -410,7 +414,8 @@ public:
     }
 
     bool ContentPassed(unsigned seconds) const {
-        return windows_ >= seconds - 2 && failed_windows_ == 0 &&
+        return windows_ >= seconds - sar_driver::kProbeUnmeasuredSeconds &&
+               failed_windows_ == 0 &&
                analysis_queue_.dropped_windows() == 0 &&
                analysis_queue_.invalid_pushes() == 0 &&
                analysis_signal_failures_.load(std::memory_order_relaxed) == 0 &&
@@ -428,13 +433,15 @@ public:
 
     bool ShortLevelPassed() const {
         return maximum_level_spread_db_ <= 0.0 ||
-               short_level_analyzer_.WithinSpread(maximum_level_spread_db_);
+               short_level_analyzer_.WithinSpread(maximum_level_spread_db_,
+                                                  minimum_level_windows_);
     }
 
     bool ContinuityPassed(unsigned seconds) const {
         return sar_driver::CaptureContinuityPassed(
             continuity_tracker_.stats(), continuity_tracker_.measured_frames(), sentFrames_,
-            sar_driver::kProbeRate * (seconds - 2));
+            sar_driver::kProbeRate *
+                (seconds - sar_driver::kProbeUnmeasuredSeconds));
     }
 
     void Summary(unsigned seconds) const {
@@ -556,6 +563,8 @@ public:
             std::cout << shortLevels.minimum_window[1];
         }
         std::cout << " short_level_spread_right_db=" << shortLevels.spread_db(1)
+                  << " short_level_minimum_required_windows="
+                  << minimum_level_windows_
                   << " short_level_passed=" << static_cast<int>(ShortLevelPassed())
                   << " tone_level_passed=" << static_cast<int>(ToneLevelPassed())
                   << " level_limit_db=" << maximum_level_spread_db_
@@ -606,6 +615,7 @@ private:
     unsigned failed_windows_ = 0;
     std::uint64_t analysis_segment_breaks_ = 0;
     double maximum_level_spread_db_ = 0.0;
+    std::size_t minimum_level_windows_ = 0;
     sar_driver::SignalLevelMonitor level_monitor_;
     bool renderStarted_ = false;
     bool captureStarted_ = false;
@@ -647,6 +657,7 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
     try {
         for (auto& stream : streams) {
             stream.SetMaximumLevelSpread(options.maximum_level_spread_db);
+            stream.SetMinimumLevelWindows(options.minimum_level_windows);
             stream.StartAnalyzer();
         }
         for (auto& stream : streams) stream.StartCapture();

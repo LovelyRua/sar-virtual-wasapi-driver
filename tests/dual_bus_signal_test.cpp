@@ -298,6 +298,8 @@ void TestLevelMonitorTracksCrossWindowSpread() {
     Expect(monitor.stats().minimum_window[0] == 2 &&
                monitor.stats().maximum_window[0] == 1,
            "automatic window indices must identify the low and high level observations");
+    Expect(!monitor.WithinSpread(6.0, 3),
+           "a stable range must fail when fewer than the required windows were observed");
     Expect(monitor.WithinSpread(3.1), "a 3 dB power spread must pass a 3.1 dB limit");
     Expect(!monitor.WithinSpread(2.9), "level threshold must reject an undersized limit");
     const double spread = monitor.stats().spread_db(0);
@@ -305,6 +307,10 @@ void TestLevelMonitorTracksCrossWindowSpread() {
            "level spread must be expressed as a power ratio in dB");
     Expect(monitor.WithinSpread(spread),
            "a threshold exactly equal to the measured spread must pass");
+    Expect(monitor.WithinSpread(spread, 2),
+           "the level gate must pass when its required valid-window count is met");
+    Expect(!monitor.WithinSpread(spread, 0),
+           "a zero-window coverage requirement must fail closed");
     Expect(std::abs(monitor.stats().minimum_dbfs(1) - 10.0 * std::log10(0.02)) < 1e-9,
            "minimum level must be reported relative to full scale");
 }
@@ -354,6 +360,8 @@ void TestSubsecondSagInsidePassingSpectralWindow() {
     const auto& stats = shortWindows.stats();
     Expect(stats.valid_windows == 10 && stats.invalid_windows == 0,
            "one second of capture must produce ten valid 100 ms RMS windows");
+    Expect(!shortWindows.WithinSpread(60.0, 11),
+           "a 100 ms analyzer must enforce the requested minimum window count");
     Expect(stats.minimum_window[0] == 2,
            "subsecond RMS windows must localize the attenuated left interval");
     Expect(stats.spread_db(0) > 3.0 && stats.spread_db(1) < 0.1,

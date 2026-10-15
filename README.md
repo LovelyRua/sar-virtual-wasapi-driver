@@ -227,9 +227,13 @@ measured frame before its position/QPC is compared. The summary reports both
 whole-run timeline diagnostics and measured-span continuity counters, including
 the largest single position gap/overlap in frames. To opt into an additional stability gate,
 append `--max-level-spread-db <0.1..60>` after the normal arguments; for
-example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. A run can therefore pass signal
-content while failing continuity, level stability, or both. The optional level
-limit defaults to disabled and does not relax the zero-discontinuity gate.
+example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. Enabling the level gate also requires
+at least ten valid 100 ms RMS windows for every measured second (`duration - 2`);
+the two excluded seconds are the probe's existing warmup/tail allowance. The
+probe reports both the observed and required window counts. A run can
+therefore pass signal content while failing continuity, level stability, or
+level-window coverage. The optional level limit defaults to disabled and does
+not relax the zero-discontinuity gate.
 When capture reports a discontinuity, silence, timestamp error, device-position
 gap/overlap, or QPC regression, the probe starts a fresh signal-analysis window
 and discards any incomplete frames from the previous segment. Per-bus summaries

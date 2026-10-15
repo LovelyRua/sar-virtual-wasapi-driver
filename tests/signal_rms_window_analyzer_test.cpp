@@ -54,13 +54,24 @@ bool non_finite_samples_fail_closed_without_poisoning_prior_windows() {
            !analyzer.WithinSpread(60.0);
 }
 
+bool minimum_valid_window_count_is_enforced() {
+    sar_driver::SignalRmsWindowAnalyzer<2> analyzer;
+    for (unsigned frame = 0; frame < 4; ++frame) {
+        analyzer.AppendFrame(0.2f, 0.2f);
+    }
+    return analyzer.stats().valid_windows == 2 &&
+           !analyzer.WithinSpread(1.0, 3) &&
+           analyzer.WithinSpread(1.0, 2);
+}
+
 }  // namespace
 
 int main() {
     return complete_windows_report_channel_mean_power() &&
                    a_short_channel_sag_is_independently_tracked() &&
                    a_segment_break_discards_only_the_incomplete_tail() &&
-                   non_finite_samples_fail_closed_without_poisoning_prior_windows()
+                   non_finite_samples_fail_closed_without_poisoning_prior_windows() &&
+                   minimum_valid_window_count_is_enforced()
                ? 0
                : 1;
 }

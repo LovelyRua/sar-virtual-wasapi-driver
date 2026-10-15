@@ -97,6 +97,12 @@ bool parse_level_limit(const wchar_t* text, double& value) {
            value >= 0.1 && value <= 60.0;
 }
 
+void apply_level_coverage_requirement(WasapiProbeOptions& options) {
+    options.minimum_level_windows = options.maximum_level_spread_db > 0.0
+        ? MinimumLevelWindowsForDuration(options.duration_seconds)
+        : 0;
+}
+
 bool strip_optional_arguments(int& argc, const wchar_t* const* argv,
                               WasapiProbeOptions& options,
                               std::wstring& error) {
@@ -170,6 +176,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
             !set_pairs(argv + 3, 1, candidate, error)) {
             return false;
         }
+        apply_level_coverage_requirement(candidate);
         candidate.first_bus = bus;
         options = std::move(candidate);
         return true;
@@ -185,6 +192,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
             !set_pairs(argv + 3, pair_count, candidate, error)) {
             return false;
         }
+        apply_level_coverage_requirement(candidate);
         options = std::move(candidate);
         return true;
     }
@@ -197,6 +205,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
         !set_pairs(argv + 1, 2, candidate, error)) {
         return false;
     }
+    apply_level_coverage_requirement(candidate);
     options = std::move(candidate);
     return true;
 }
