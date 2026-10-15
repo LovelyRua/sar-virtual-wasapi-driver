@@ -4,15 +4,22 @@
 
 int main() {
     using sar_driver::MinimumLevelWindowsForDuration;
+    const auto maximum_seconds = std::numeric_limits<unsigned>::max();
+    const auto measured_seconds = static_cast<std::size_t>(
+        maximum_seconds - sar_driver::kProbeUnmeasuredSeconds);
+    const auto maximum_window_count = std::numeric_limits<std::size_t>::max();
+    const auto expected_maximum = measured_seconds >
+            maximum_window_count / sar_driver::kLevelWindowsPerSecond
+        ? maximum_window_count
+        : measured_seconds * sar_driver::kLevelWindowsPerSecond;
     return MinimumLevelWindowsForDuration(0) == 0 &&
                    MinimumLevelWindowsForDuration(2) == 0 &&
                    MinimumLevelWindowsForDuration(5) == 30 &&
                    MinimumLevelWindowsForDuration(15) == 130 &&
                    MinimumLevelWindowsForDuration(60) == 580 &&
                    MinimumLevelWindowsForDuration(3600) == 35980 &&
-                   MinimumLevelWindowsForDuration(
-                       std::numeric_limits<unsigned>::max()) ==
-                       std::numeric_limits<std::size_t>::max()
+                   MinimumLevelWindowsForDuration(maximum_seconds) ==
+                       expected_maximum
         ? 0
         : 1;
 }
