@@ -1,5 +1,7 @@
 #pragma once
 
+#include "signal_level_coverage_policy.h"
+
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -97,8 +99,8 @@ public:
         double maximum_spread_db,
         std::size_t minimum_valid_windows = 1) const noexcept {
         return std::isfinite(maximum_spread_db) && maximum_spread_db > 0.0 &&
-               minimum_valid_windows != 0 &&
-               stats_.valid_windows >= minimum_valid_windows &&
+               LevelWindowCoveragePassed(stats_.valid_windows,
+                                         minimum_valid_windows) &&
                stats_.invalid_windows == 0 &&
                stats_.spread_db(0) <= maximum_spread_db &&
                stats_.spread_db(1) <= maximum_spread_db;

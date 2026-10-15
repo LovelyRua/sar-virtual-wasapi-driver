@@ -4,6 +4,7 @@
 
 int main() {
     using sar_driver::MinimumLevelWindowsForDuration;
+    using sar_driver::LevelWindowCoveragePassed;
     const auto maximum_seconds = std::numeric_limits<unsigned>::max();
     const auto measured_seconds = static_cast<std::size_t>(
         maximum_seconds - sar_driver::kProbeUnmeasuredSeconds);
@@ -19,7 +20,10 @@ int main() {
                    MinimumLevelWindowsForDuration(60) == 580 &&
                    MinimumLevelWindowsForDuration(3600) == 35980 &&
                    MinimumLevelWindowsForDuration(maximum_seconds) ==
-                       expected_maximum
+                       expected_maximum &&
+                   !LevelWindowCoveragePassed(129, 130) &&
+                   LevelWindowCoveragePassed(130, 130) &&
+                   !LevelWindowCoveragePassed(1000, 0)
         ? 0
         : 1;
 }

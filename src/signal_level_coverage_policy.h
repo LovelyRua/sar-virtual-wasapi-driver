@@ -9,6 +9,12 @@ namespace sar_driver {
 constexpr unsigned kProbeUnmeasuredSeconds = 2;
 constexpr std::size_t kLevelWindowsPerSecond = 10;
 
+constexpr bool LevelWindowCoveragePassed(
+    std::size_t observed_windows,
+    std::size_t required_windows) noexcept {
+    return required_windows != 0 && observed_windows >= required_windows;
+}
+
 constexpr std::size_t MinimumLevelWindowsForDuration(unsigned seconds) noexcept {
     if (seconds <= kProbeUnmeasuredSeconds) return 0;
     const auto measured_seconds =
