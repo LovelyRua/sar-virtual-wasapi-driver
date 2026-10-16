@@ -140,5 +140,21 @@ try {
         throw "WASAPI probe failed with exit code $($probeExitCodes[0])."
     }
 } finally {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($null -ne $task -and $task.State -eq 'Running') {
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            $stopDeadline = (Get-Date).AddSeconds(5)
+            do {
+                $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+                if ($null -eq $task -or $task.State -ne 'Running') { break }
+                if ((Get-Date) -ge $stopDeadline) {
+                    throw 'Interactive probe task did not stop after cleanup was requested.'
+                }
+                Start-Sleep -Milliseconds 100
+            } while ($true)
+        }
+    } finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
 }

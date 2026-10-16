@@ -37,7 +37,14 @@ function Assert-Rejected([hashtable] $Arguments, [string] $ExpectedMessage) {
 try {
     $global:SarCapturedActionArgument = $null
     $global:SarTaskDisappears = $false
-$global:SarFakeProbeStatus = 'PROBE_EXIT=0'
+    $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
+    $global:SarKeepTaskRunning = $false
+    $global:SarStopRequested = $false
+    $global:SarStopCalls = 0
+    $global:SarUnregisterCalls = 0
+    $global:SarForceTimeout = $false
+    $global:SarGetDateCalls = 0
+    $global:SarFakeNow = [datetime]'2026-01-01T00:00:00'
     function New-ScheduledTaskAction {
         param([string] $Execute, [string] $Argument)
         [pscustomobject]@{ Execute = $Execute; Argument = $Argument }
@@ -55,15 +62,35 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
         $global:SarCapturedActionArgument = $Action.Argument
     }
     function Start-ScheduledTask {
-        Set-Content -LiteralPath $reportPath -Value @('synthetic probe output', $global:SarFakeProbeStatus)
+        if (-not $global:SarKeepTaskRunning) {
+            Set-Content -LiteralPath $reportPath -Value @('synthetic probe output', $global:SarFakeProbeStatus)
+        }
     }
     function Get-ScheduledTask {
         [CmdletBinding()]
         param([string] $TaskName)
         if ($global:SarTaskDisappears) { return $null }
-        [pscustomobject]@{ State = 'Ready' }
+        $state = if ($global:SarKeepTaskRunning -and -not $global:SarStopRequested) { 'Running' } else { 'Ready' }
+        [pscustomobject]@{ State = $state }
     }
-    function Unregister-ScheduledTask {}
+    function Stop-ScheduledTask {
+        [CmdletBinding()]
+        param([string] $TaskName)
+        $global:SarStopCalls++
+        $global:SarStopRequested = $true
+    }
+    function Unregister-ScheduledTask {
+        [CmdletBinding()]
+        param([string] $TaskName, [switch] $Confirm)
+        $global:SarUnregisterCalls++
+    }
+    function Get-Date {
+        $global:SarGetDateCalls++
+        if ($global:SarForceTimeout -and $global:SarGetDateCalls -eq 2) {
+            $global:SarFakeNow = $global:SarFakeNow.AddMinutes(1)
+        }
+        $global:SarFakeNow
+    }
     function Get-Process { [pscustomobject]@{ SessionId = 1 } }
 
     $base = @{
@@ -82,6 +109,23 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
     if ($completedAfterTaskRemoval -notcontains 'PROBE_EXIT=0') {
         throw 'Launcher did not accept a completed report after the scheduled task disappeared.'
     }
+
+    $global:SarKeepTaskRunning = $true
+    $global:SarForceTimeout = $true
+    $global:SarStopRequested = $false
+    $global:SarStopCalls = 0
+    $global:SarFakeNow = [datetime]'2026-01-01T00:00:00'
+    $global:SarGetDateCalls = 0
+    $unregistersBeforeTimeout = $global:SarUnregisterCalls
+    Assert-Rejected $base 'Interactive probe timed out.'
+    if ($global:SarStopCalls -ne 1 -or -not $global:SarStopRequested) {
+        throw 'Timed-out interactive probe task was not stopped.'
+    }
+    if ($global:SarUnregisterCalls -ne ($unregistersBeforeTimeout + 1)) {
+        throw 'Timed-out interactive probe task was not unregistered.'
+    }
+    $global:SarKeepTaskRunning = $false
+    $global:SarForceTimeout = $false
 
     $global:SarFakeProbeStatus = 'PROBE_EXIT=7'
     Assert-Rejected $base 'WASAPI probe failed with exit code 7.'
@@ -250,7 +294,7 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=26'
+    Write-Output 'lab_interactive_probe_tests passed=27'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
