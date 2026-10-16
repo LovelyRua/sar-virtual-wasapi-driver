@@ -82,6 +82,7 @@ if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue |
 }
 
 $taskName = "SARLab-InteractiveAudioProbe-$([guid]::NewGuid().ToString('N'))"
+$maximumReportBytes = 16MB
 $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
 $levelLimit = ''
@@ -115,6 +116,9 @@ try {
     do {
         $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
         $reportExists = Test-Path -LiteralPath $OutputPath
+        if ($reportExists -and (Get-Item -LiteralPath $OutputPath).Length -gt $maximumReportBytes) {
+            throw "Interactive probe report exceeds the $maximumReportBytes-byte limit."
+        }
         if ($reportExists -and ($null -eq $task -or $task.State -ne 'Running')) { break }
         if ((Get-Date) -ge $deadline) {
             if ($null -eq $task) { throw 'Interactive task disappeared before writing a probe report.' }
@@ -124,6 +128,9 @@ try {
     } while ($true)
     if (-not (Test-Path -LiteralPath $OutputPath)) {
         throw "Interactive task completed without a probe report: $((Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult)"
+    }
+    if ((Get-Item -LiteralPath $OutputPath).Length -gt $maximumReportBytes) {
+        throw "Interactive probe report exceeds the $maximumReportBytes-byte limit."
     }
     $probeOutput = @(Get-Content -LiteralPath $OutputPath)
     $probeOutput

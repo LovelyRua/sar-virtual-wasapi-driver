@@ -22,6 +22,7 @@ foreach ($path in @($EndpointManagerPath, $ProbePath, $InteractiveLauncherPath))
 }
 
 $reportPath = [IO.Path]::GetFullPath($OutputPath)
+$maximumProbeReportBytes = 16MB
 $probeLogPath = "$reportPath.probe.txt"
 $reportDirectory = Split-Path -Parent $reportPath
 if ($reportDirectory -and -not (Test-Path -LiteralPath $reportDirectory)) {
@@ -101,17 +102,22 @@ try {
 
 Write-Verbose 'Evaluating the interactive probe report.'
 if (Test-Path -LiteralPath $probeLogPath -PathType Leaf) {
-    $probeOutput = [string[]]@(Get-Content -LiteralPath $probeLogPath |
-        ForEach-Object { [string]$_ })
-    Write-Verbose "Read $($probeOutput.Count) probe report lines."
-    $exitLines = @($probeOutput | Where-Object { [string]$_ -match '^PROBE_EXIT=(\d+)$' })
-    if ($exitLines.Count -eq 1) {
-        $probeExitCode = [int]([string]$exitLines[0] -replace '^PROBE_EXIT=', '')
-    } elseif ($failure -eq $null) {
-        $failure = 'Interactive audio probe report did not contain exactly one exit status.'
-    }
-    if ($probeExitCode -ne $null -and $probeExitCode -ne 0 -and $failure -eq $null) {
-        $failure = "WASAPI audio probe exited with code $probeExitCode."
+    $probeReportBytes = (Get-Item -LiteralPath $probeLogPath).Length
+    if ($probeReportBytes -gt $maximumProbeReportBytes) {
+        $failure = "Interactive probe report exceeds the $maximumProbeReportBytes-byte limit."
+    } else {
+        $probeOutput = [string[]]@(Get-Content -LiteralPath $probeLogPath |
+            ForEach-Object { [string]$_ })
+        Write-Verbose "Read $($probeOutput.Count) probe report lines."
+        $exitLines = @($probeOutput | Where-Object { [string]$_ -match '^PROBE_EXIT=(\d+)$' })
+        if ($exitLines.Count -eq 1) {
+            $probeExitCode = [int]([string]$exitLines[0] -replace '^PROBE_EXIT=', '')
+        } elseif ($failure -eq $null) {
+            $failure = 'Interactive audio probe report did not contain exactly one exit status.'
+        }
+        if ($probeExitCode -ne $null -and $probeExitCode -ne 0 -and $failure -eq $null) {
+            $failure = "WASAPI audio probe exited with code $probeExitCode."
+        }
     }
 } elseif ($failure -eq $null) {
     $failure = 'Interactive audio probe did not produce a report.'

@@ -7,6 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$maximumInventoryBytes = 4MB
 
 # Do not leave a previous successful report behind when this run fails to parse.
 if ($ReportPath) { Remove-Item -LiteralPath $ReportPath -Force -ErrorAction SilentlyContinue }
@@ -20,6 +21,10 @@ if ($ProbePath) {
     $lines = @(& $probe --list 2>&1 | ForEach-Object { [string]$_ })
     if ($LASTEXITCODE -ne 0) { throw "Endpoint probe exited with code $LASTEXITCODE." }
 } else {
+    $inventoryFile = Get-Item -LiteralPath $InventoryPath
+    if ($inventoryFile.Length -gt $maximumInventoryBytes) {
+        throw "Endpoint inventory exceeds the $maximumInventoryBytes-byte limit."
+    }
     $lines = @(Get-Content -LiteralPath $InventoryPath)
 }
 

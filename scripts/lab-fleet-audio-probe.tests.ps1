@@ -28,7 +28,8 @@ $captureIds = @(
 )
 $savedEnvironment = @{}
 foreach ($name in 'SAR_FLEET_TEST_PLAN', 'SAR_FLEET_TEST_MANAGER_EXIT',
-                  'SAR_FLEET_TEST_PROBE_EXIT', 'SAR_FLEET_TEST_ARGS_PATH') {
+                  'SAR_FLEET_TEST_PROBE_EXIT', 'SAR_FLEET_TEST_ARGS_PATH',
+                  'SAR_FLEET_TEST_OVERSIZE_PROBE') {
     $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
@@ -101,13 +102,19 @@ param(
     "AdditionalCaptureIds=$($AdditionalCaptureIds -join ',')",
     "MaximumLevelSpreadDb=$MaximumLevelSpreadDb"
 ) | Set-Content -LiteralPath $env:SAR_FLEET_TEST_ARGS_PATH
-Set-Content -LiteralPath $OutputPath -Value @('synthetic audio analysis', "PROBE_EXIT=$env:SAR_FLEET_TEST_PROBE_EXIT")
+if ($env:SAR_FLEET_TEST_OVERSIZE_PROBE -eq '1') {
+    $stream = [IO.File]::Open($OutputPath, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+    try { $stream.SetLength(16MB + 1) } finally { $stream.Dispose() }
+} else {
+    Set-Content -LiteralPath $OutputPath -Value @('synthetic audio analysis', "PROBE_EXIT=$env:SAR_FLEET_TEST_PROBE_EXIT")
+}
 '@
 
 try {
     $env:SAR_FLEET_TEST_ARGS_PATH = $argsPath
     $env:SAR_FLEET_TEST_MANAGER_EXIT = '0'
     $env:SAR_FLEET_TEST_PROBE_EXIT = '0'
+    $env:SAR_FLEET_TEST_OVERSIZE_PROBE = '0'
     $env:SAR_FLEET_TEST_PLAN = (New-TestPlan | ConvertTo-Json -Depth 8 -Compress)
     Write-Host 'Testing four-adapter/eight-bus launch path'
     Invoke-TestRunner
@@ -150,6 +157,16 @@ try {
     }
 
     $env:SAR_FLEET_TEST_PROBE_EXIT = '0'
+    $env:SAR_FLEET_TEST_OVERSIZE_PROBE = '1'
+    Write-Host 'Testing bounded probe-report ingestion'
+    Assert-Failure 'Interactive probe report exceeds the 16777216-byte limit.'
+    $report = Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json
+    if ($report.Passed -or $report.ProbeOutput.Count -ne 0 -or
+        $report.Error -notmatch '16777216-byte limit') {
+        throw 'Oversized probe report was read or incorrectly accepted.'
+    }
+    $env:SAR_FLEET_TEST_OVERSIZE_PROBE = '0'
+
     $env:SAR_FLEET_TEST_MANAGER_EXIT = '3'
     Write-Host 'Testing unstable fleet rejection'
     Assert-Failure 'Fleet did not reach stable readiness'
@@ -170,7 +187,7 @@ try {
         throw 'Invalid duplicate-endpoint plan reached the interactive launcher.'
     }
 
-    Write-Output 'lab_fleet_audio_probe_tests passed=6'
+    Write-Output 'lab_fleet_audio_probe_tests passed=7'
 } finally {
     foreach ($name in $savedEnvironment.Keys) {
         [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')

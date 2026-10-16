@@ -39,6 +39,7 @@ try {
     $global:SarTaskDisappears = $false
     $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
     $global:SarKeepTaskRunning = $false
+    $global:SarOversizeReport = $false
     $global:SarStopRequested = $false
     $global:SarStopCalls = 0
     $global:SarUnregisterCalls = 0
@@ -62,7 +63,10 @@ try {
         $global:SarCapturedActionArgument = $Action.Argument
     }
     function Start-ScheduledTask {
-        if (-not $global:SarKeepTaskRunning) {
+        if ($global:SarOversizeReport) {
+            $stream = [IO.File]::Open($reportPath, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+            try { $stream.SetLength(16MB + 1) } finally { $stream.Dispose() }
+        } elseif (-not $global:SarKeepTaskRunning) {
             Set-Content -LiteralPath $reportPath -Value @('synthetic probe output', $global:SarFakeProbeStatus)
         }
     }
@@ -126,6 +130,10 @@ try {
     }
     $global:SarKeepTaskRunning = $false
     $global:SarForceTimeout = $false
+
+    $global:SarOversizeReport = $true
+    Assert-Rejected $base 'Interactive probe report exceeds the 16777216-byte limit.'
+    $global:SarOversizeReport = $false
 
     $global:SarFakeProbeStatus = 'PROBE_EXIT=7'
     Assert-Rejected $base 'WASAPI probe failed with exit code 7.'
@@ -294,7 +302,7 @@ try {
         if ($_.Exception.Message -notmatch 'BusIndex') { throw }
     }
 
-    Write-Output 'lab_interactive_probe_tests passed=27'
+    Write-Output 'lab_interactive_probe_tests passed=28'
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
