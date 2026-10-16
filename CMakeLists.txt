@@ -142,11 +142,23 @@ else()
 endif()
 add_test(NAME fleet_readiness_gate_test COMMAND fleet_readiness_gate_test)
 
+add_executable(instance_removal_gate_test
+  tests/instance_removal_gate_test.cpp)
+target_compile_features(instance_removal_gate_test PRIVATE cxx_std_17)
+target_include_directories(instance_removal_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(instance_removal_gate_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(instance_removal_gate_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME instance_removal_gate_test COMMAND instance_removal_gate_test)
+
 if(WIN32)
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_sources(sar_device_instances PRIVATE
     src/wasapi_inventory.cpp
     src/endpoint_readiness.cpp
+    src/endpoint_removal.cpp
     src/fleet_readiness.cpp
     src/fleet_audio_probe_plan.cpp
   )

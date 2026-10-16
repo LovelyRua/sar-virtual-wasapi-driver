@@ -114,7 +114,7 @@ HRESULT inspect_instance_readiness(
             FAILED(endpoint.parent_lookup_error)) {
             ++readiness.active_unassociated_endpoint_count;
         }
-        if (same_id(endpoint.parent_device_id, instance.id)) {
+        if (endpoint_parent_matches(endpoint, instance.id)) {
             count_endpoint(endpoint, readiness.counts);
             readiness.endpoints.push_back(endpoint);
         }

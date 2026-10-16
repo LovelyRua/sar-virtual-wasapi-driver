@@ -301,6 +301,17 @@ HRESULT enumerate_wasapi_endpoints(std::vector<WasapiEndpoint>& endpoints) {
     return S_OK;
 }
 
+bool endpoint_parent_matches(const WasapiEndpoint& endpoint,
+                             const std::wstring& instance_id) noexcept {
+    return !endpoint.parent_device_id.empty() &&
+           endpoint.parent_device_id.size() == instance_id.size() &&
+           std::equal(endpoint.parent_device_id.begin(),
+                      endpoint.parent_device_id.end(), instance_id.begin(),
+                      [](wchar_t left, wchar_t right) {
+                          return std::towupper(left) == std::towupper(right);
+                      });
+}
+
 const wchar_t* flow_name(EndpointFlow flow) {
     return flow == EndpointFlow::render ? L"render" : L"capture";
 }

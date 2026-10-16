@@ -152,6 +152,28 @@ status, endpoint IDs, and state-specific diagnostic guidance. `diagnose` is a
 point-in-time snapshot; `wait-ready` polls for up to 120 seconds and returns
 success only after stable readiness.
 
+For a deterministic instance teardown, opt in to waiting after removal. The
+manager records the instance's current WASAPI endpoint IDs, removes only that
+SAR PnP instance, then waits until the PnP roster matches the pre-removal roster
+minus that instance and its associated or previously observed endpoints are
+gone for three consecutive samples:
+
+```bat
+sar_endpoint_manager.exe remove ROOT\MEDIA\0001 --confirm --wait-ms 30000
+sar_endpoint_manager.exe remove ROOT\MEDIA\0001 --confirm --wait-ms 30000 --json
+```
+
+Exit code `0` means the expected remaining SAR roster and endpoint teardown
+were stable. Exit code `3` means removal was requested but teardown did not
+reach that state before timeout; inspect `state`, `remainingEndpointCount`,
+`unassociatedEndpointCount`, and roster counts in JSON. The wait form fails
+closed without removing the device if any enumerated WASAPI endpoint cannot be
+attributed to a PnP parent; it cannot safely prove teardown in that state.
+Other exit codes indicate an input, inventory, or PnP removal error. A timeout
+does not reinstall the device or remove its shared driver package. The legacy
+`remove <id> --confirm` remains an immediate PnP removal request without
+endpoint-disappearance confirmation.
+
 For a multi-instance check, `fleet` reports every present SAR adapter using
 one PnP roster and one shared WASAPI endpoint snapshot. `wait-fleet` succeeds
 only when every listed instance is ready and the exact same instance-ID set

@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include "src/device_instances.h"
+#include "src/endpoint_removal.h"
 #include "src/endpoint_readiness.h"
 #include "src/fleet_readiness.h"
 #include "src/fleet_audio_probe_plan.h"
@@ -27,7 +28,7 @@ void usage() {
         << L"  sar_endpoint_manager list [--json]\n"
         << L"  sar_endpoint_manager add <signed-driver.inf> <label>\n"
         << L"  sar_endpoint_manager rename <instance-id> <label>\n"
-        << L"  sar_endpoint_manager remove <instance-id> --confirm\n"
+        << L"  sar_endpoint_manager remove <instance-id> --confirm [--wait-ms <timeout>] [--json]\n"
         << L"  sar_endpoint_manager endpoints [all|render|capture] [--json]\n"
         << L"  sar_endpoint_manager summary [--json]\n"
         << L"  sar_endpoint_manager wait-endpoints <all|render|capture> <count> <timeout-ms>\n"
@@ -564,6 +565,57 @@ int remove(const std::wstring& id) {
     return 0;
 }
 
+void print_removal_json(
+    const sar::devices::InstanceRemovalReadiness& readiness) {
+    std::wcout << L"{\"instanceId\":";
+    json_string(readiness.instance_id);
+    std::wcout << L",\"state\":";
+    json_string(sar::devices::removal_state_name(readiness.state));
+    std::wcout << L",\"removed\":" << (readiness.removed() ? L"true" : L"false")
+               << L",\"initialEndpointCount\":" << readiness.initial_endpoint_count
+               << L",\"remainingEndpointCount\":" << readiness.remaining_endpoint_count
+               << L",\"unassociatedEndpointCount\":"
+               << readiness.unassociated_endpoint_count
+               << L",\"stableSamples\":" << readiness.stable_samples
+               << L",\"expectedRosterCount\":" << readiness.expected_roster.size()
+               << L",\"observedRosterCount\":" << readiness.observed_roster.size()
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(readiness.inventory_error) << L"}\n";
+}
+
+int remove_and_wait(const std::wstring& id, unsigned timeout_ms, bool as_json) {
+    sar::devices::InstanceRemovalReadiness readiness;
+    const HRESULT result = sar::devices::remove_and_wait(id, timeout_ms, readiness);
+    if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) {
+        std::wcerr << L"Remove operation failed: 0x" << std::hex
+                   << static_cast<unsigned long>(result) << std::dec << L'\n';
+        return 1;
+    }
+    if (as_json) {
+        print_removal_json(readiness);
+    } else {
+        std::wcout << L"Removal state: "
+                   << sar::devices::removal_state_name(readiness.state) << L"\n"
+                   << L"  instance: " << readiness.instance_id << L"\n"
+                   << L"  endpoints before/remaining: "
+                   << readiness.initial_endpoint_count << L" / "
+                   << readiness.remaining_endpoint_count << L"\n"
+                   << L"  unassociated endpoints: "
+                   << readiness.unassociated_endpoint_count << L"\n"
+                   << L"  stable samples: " << readiness.stable_samples << L"\n";
+    }
+    if (readiness.removed()) {
+        if (!as_json) {
+            std::wcout << L"The shared signed driver package remains installed.\n";
+        }
+        return 0;
+    }
+    std::wcerr << L"Removal was requested, but the PnP/WASAPI teardown did not "
+               << L"reach a stable absent state before timeout. The device is "
+               << L"not reinstalled automatically.\n";
+    return 3;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -645,13 +697,29 @@ int wmain(int argc, wchar_t** argv) {
         }
         return rename(argv[2], argv[3]);
     }
-    if (argc == 4 && std::wcscmp(argv[1], L"remove") == 0 &&
+    if (argc >= 4 && std::wcscmp(argv[1], L"remove") == 0 &&
         std::wcscmp(argv[3], L"--confirm") == 0) {
+        unsigned timeout_ms = 0;
+        bool wait_requested = false;
+        bool as_json = false;
+        for (int index = 4; index < argc; ++index) {
+            if (std::wcscmp(argv[index], L"--json") == 0 && !as_json) {
+                as_json = true;
+            } else if (std::wcscmp(argv[index], L"--wait-ms") == 0 &&
+                       !wait_requested && index + 1 < argc) {
+                if (!parse_timeout(argv[++index], timeout_ms)) return 2;
+                wait_requested = true;
+            } else {
+                return 2;
+            }
+        }
+        if (as_json && !wait_requested) return 2;
         if (!elevated()) {
             std::wcerr << L"error: an elevated prompt is required for remove\n";
             return 1;
         }
-        return remove(argv[2]);
+        return wait_requested ? remove_and_wait(argv[2], timeout_ms, as_json)
+                              : remove(argv[2]);
     }
     usage();
     return 2;

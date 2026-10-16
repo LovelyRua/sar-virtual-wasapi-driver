@@ -37,7 +37,7 @@ std::wstring lower(std::wstring value) {
 }
 
 bool same_id(const std::wstring& lhs, const std::wstring& rhs) {
-    return lower(lhs) == lower(rhs);
+    return same_instance_id(lhs, rhs);
 }
 
 bool acceptable_label(const std::wstring& label) {
@@ -229,6 +229,15 @@ Result Result::success() { return {true, ERROR_SUCCESS, L""}; }
 
 Result Result::failure(DWORD error, const wchar_t* operation) {
     return {false, error, operation};
+}
+
+bool same_instance_id(const std::wstring& lhs,
+                      const std::wstring& rhs) noexcept {
+    return lhs.size() == rhs.size() &&
+           std::equal(lhs.begin(), lhs.end(), rhs.begin(),
+                      [](wchar_t left, wchar_t right) {
+                          return std::towupper(left) == std::towupper(right);
+                      });
 }
 
 Result list(std::vector<Instance>& instances) {

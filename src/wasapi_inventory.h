@@ -31,6 +31,8 @@ struct WasapiEndpoint {
 };
 
 HRESULT enumerate_wasapi_endpoints(std::vector<WasapiEndpoint>& endpoints);
+bool endpoint_parent_matches(const WasapiEndpoint& endpoint,
+                             const std::wstring& instance_id) noexcept;
 const wchar_t* flow_name(EndpointFlow flow);
 const wchar_t* state_name(DWORD state);
 const wchar_t* sample_format_name(WORD format_tag);

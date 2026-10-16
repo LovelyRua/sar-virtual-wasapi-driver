@@ -33,6 +33,8 @@ constexpr wchar_t kHardwareId[] = L"Root\\SystemAudioRoute\\VirtualAudio";
 // count conservative until concurrent multi-instance VM tests pass.
 constexpr size_t kMaximumInstances = 2;
 
+bool same_instance_id(const std::wstring& lhs,
+                      const std::wstring& rhs) noexcept;
 Result list(std::vector<Instance>& instances);
 Result add(const std::wstring& inf_path, const std::wstring& label,
            Instance& created);
