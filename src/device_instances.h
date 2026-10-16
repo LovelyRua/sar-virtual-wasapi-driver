@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -29,9 +30,13 @@ struct Result {
 // The hardware ID is intentionally fixed. Never accept a caller-selected ID here:
 // it would make removal or renaming capable of touching an unrelated audio device.
 constexpr wchar_t kHardwareId[] = L"Root\\SystemAudioRoute\\VirtualAudio";
-// The current adapter owns bridge state per instance; keep the supported
-// count conservative until concurrent multi-instance VM tests pass.
-constexpr size_t kMaximumInstances = 2;
+// Capacity for the experimental fleet tools, not a claim that a full-fleet
+// audio soak has passed on hardware.
+constexpr std::size_t kMaximumInstances = 4;
+
+constexpr bool can_add_instance(std::size_t current) noexcept {
+    return current < kMaximumInstances;
+}
 
 bool same_instance_id(const std::wstring& lhs,
                       const std::wstring& rhs) noexcept;

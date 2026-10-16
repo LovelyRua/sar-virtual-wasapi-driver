@@ -35,7 +35,6 @@ jobs:
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
           /p:Configuration=Release /p:Platform=x64 /m /v:minimal
       - name: Build lab tools and run CTest
-        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         timeout-minutes: 10
         run: |
@@ -48,6 +47,20 @@ jobs:
           Write-Host 'Running all CTest modules'
           ctest --test-dir lab-tools-build -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw 'Transport tests failed while preparing the lab package' }
+
+      - name: Run PowerShell lab orchestration tests
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          foreach ($testPath in @(
+            'scripts/lab-endpoint-inventory.tests.ps1'
+            'scripts/lab-interactive-probe.tests.ps1'
+            'scripts/lab-fleet-audio-probe.tests.ps1'
+          )) {
+            Write-Host "Running $testPath"
+            & $testPath
+            if (-not $?) { throw "PowerShell test failed: $testPath" }
+          }
 
       - name: Collect package and generate catalog
         if: github.event_name == 'workflow_dispatch'

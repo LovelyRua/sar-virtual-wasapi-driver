@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include "fleet_audio_probe_plan.h"
+#include "device_instances.h"
 
 #include <algorithm>
 #include <cwctype>
@@ -76,8 +77,8 @@ bool build_fleet_audio_probe_plan(const FleetReadiness& fleet,
         plan.error = L"The complete fleet did not pass its stable readiness window.";
         return false;
     }
-    if (fleet.instances.empty() || fleet.instances.size() > 2) {
-        plan.error = L"Audio probing supports one or two ready SAR instances.";
+    if (fleet.instances.empty() || fleet.instances.size() > kMaximumInstances) {
+        plan.error = L"Audio probing supports one to four ready SAR instances.";
         return false;
     }
 

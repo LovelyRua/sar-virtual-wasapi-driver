@@ -24,6 +24,19 @@ bool test_stable_roster_requires_consecutive_ready_samples() {
     return gate.observe(ids, true) && gate.stable_samples() == 3;
 }
 
+bool test_four_adapter_roster_stabilizes_across_reordered_samples() {
+    FleetReadinessGate gate(3);
+    const std::vector<std::wstring> first{
+        L"ROOT\\MEDIA\\0001", L"ROOT\\MEDIA\\0002",
+        L"ROOT\\MEDIA\\0003", L"ROOT\\MEDIA\\0004"};
+    const std::vector<std::wstring> reordered{
+        L"root\\media\\0004", L"root\\media\\0002",
+        L"root\\media\\0001", L"root\\media\\0003"};
+    if (gate.observe(first, true) || gate.stable_samples() != 1) return false;
+    if (gate.observe(reordered, true) || gate.stable_samples() != 2) return false;
+    return gate.observe(first, true) && gate.stable_samples() == 3;
+}
+
 bool test_order_and_case_changes_do_not_reset_the_roster() {
     FleetReadinessGate gate(3);
     if (gate.observe({L"ROOT\\MEDIA\\0001", L"ROOT\\MEDIA\\0002"}, true)) return false;
@@ -85,6 +98,7 @@ bool test_zero_required_samples_is_clamped_to_one() {
 int main() {
     if (!test_empty_fleet_never_becomes_ready()) return 1;
     if (!test_stable_roster_requires_consecutive_ready_samples()) return 2;
+    if (!test_four_adapter_roster_stabilizes_across_reordered_samples()) return 9;
     if (!test_order_and_case_changes_do_not_reset_the_roster()) return 3;
     if (!test_unready_member_resets_stability()) return 4;
     if (!test_unready_sample_after_ready_restarts_full_stability_window()) return 5;

@@ -10,7 +10,8 @@ namespace sar_driver {
 
 constexpr unsigned kMinimumProbeSeconds = 5;
 constexpr unsigned kMaximumProbeSeconds = 3600;
-constexpr std::size_t kMaximumProbeBuses = 4;
+constexpr std::size_t kMaximumProbeBuses = 8;
+constexpr std::size_t kMaximumProbeArguments = kMaximumProbeBuses * 2 + 6;
 
 struct WasapiProbeOptions {
     unsigned duration_seconds = 0;

@@ -61,7 +61,7 @@ bool set_duration(const wchar_t* text, WasapiProbeOptions& options,
 bool set_pairs(const wchar_t* const* ids, std::size_t pair_count,
                WasapiProbeOptions& options, std::wstring& error) {
     if (pair_count < 1 || pair_count > kMaximumProbeBuses) {
-        error = L"Probe requires one to four render/capture pairs.";
+        error = L"Probe requires one to eight render/capture pairs.";
         return false;
     }
     for (std::size_t pair = 0; pair < pair_count; ++pair) {
@@ -169,7 +169,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
         if (argc != 6 || !parse_unsigned(argv[2], 0,
                                          static_cast<unsigned>(kMaximumProbeBuses - 1),
                                          bus)) {
-            error = L"Single mode requires a bus index from 0 to 3.";
+            error = L"Single mode requires a bus index from 0 to 7.";
             return false;
         }
         if (!set_duration(argv[5], candidate, error) ||
@@ -183,8 +183,10 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
     }
 
     if (std::wcscmp(argv[1], L"--multi") == 0) {
-        if (argc < 7 || argc > 11 || (argc - 3) % 2 != 0) {
-            error = L"Multi mode requires two to four render/capture pairs.";
+        if (argc < 7 ||
+            argc > static_cast<int>(kMaximumProbeArguments) ||
+            (argc - 3) % 2 != 0) {
+            error = L"Multi mode requires two to eight render/capture pairs.";
             return false;
         }
         const std::size_t pair_count = static_cast<std::size_t>((argc - 3) / 2);

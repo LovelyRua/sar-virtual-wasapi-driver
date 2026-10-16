@@ -62,14 +62,14 @@ bool test_numeric_arguments_require_ascii_decimal_digits() {
 }
 
 bool test_single_mode_accepts_last_bus() {
-    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"3", L"r3", L"c3", L"5"}};
+    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"7", L"r7", L"c7", L"5"}};
     sar_driver::WasapiProbeOptions options;
     return parse(args.data(), 6, options) && options.pair_count == 1 &&
-           options.first_bus == 3 && options.endpoint_ids[0] == args[3];
+           options.first_bus == 7 && options.endpoint_ids[0] == args[3];
 }
 
 bool test_single_mode_rejects_out_of_range_bus() {
-    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"4", L"r", L"c", L"5"}};
+    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"8", L"r", L"c", L"5"}};
     sar_driver::WasapiProbeOptions options;
     return !parse(args.data(), 6, options);
 }
@@ -94,17 +94,36 @@ bool test_multi_mode_accepts_four_pairs() {
            options.endpoint_ids[6] == args[9] && options.endpoint_ids[7] == args[10];
 }
 
+bool test_multi_mode_accepts_eight_pairs_with_all_optional_suffixes() {
+    const std::array<const wchar_t*, sar_driver::kMaximumProbeArguments> args{{
+        L"probe", L"--multi", L"60",
+        L"r0", L"c0", L"r1", L"c1", L"r2", L"c2", L"r3", L"c3",
+        L"r4", L"c4", L"r5", L"c5", L"r6", L"c6", L"r7", L"c7",
+        L"--max-level-spread-db", L"6.5", L"--no-mmcss"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(args.data(), static_cast<int>(args.size()), options) &&
+           options.pair_count == 8 && options.endpoint_ids[0] == args[3] &&
+           options.endpoint_ids[14] == args[17] &&
+           options.endpoint_ids[15] == args[18] &&
+           options.maximum_level_spread_db == 6.5 && !options.enable_mmcss;
+}
+
 bool test_multi_mode_rejects_odd_endpoint_count() {
     const std::array<const wchar_t*, 8> args{{L"probe", L"--multi", L"10", L"r0", L"c0", L"r1", L"c1", L"extra"}};
     sar_driver::WasapiProbeOptions options;
     return !parse(args.data(), 8, options);
 }
 
-bool test_multi_mode_rejects_one_or_five_pairs() {
+bool test_multi_mode_rejects_one_or_nine_pairs() {
     const std::array<const wchar_t*, 5> one{{L"probe", L"--multi", L"10", L"r0", L"c0"}};
-    const std::array<const wchar_t*, 13> five{{L"probe", L"--multi", L"10", L"r0", L"c0", L"r1", L"c1", L"r2", L"c2", L"r3", L"c3", L"r4", L"c4"}};
+    const std::array<const wchar_t*, 21> nine{{
+        L"probe", L"--multi", L"10",
+        L"r0", L"c0", L"r1", L"c1", L"r2", L"c2", L"r3", L"c3",
+        L"r4", L"c4", L"r5", L"c5", L"r6", L"c6", L"r7", L"c7",
+        L"r8", L"c8"}};
     sar_driver::WasapiProbeOptions options;
-    return !parse(one.data(), 5, options) && !parse(five.data(), 13, options);
+    return !parse(one.data(), 5, options) &&
+           !parse(nine.data(), static_cast<int>(nine.size()), options);
 }
 
 bool test_multi_mode_rejects_missing_and_empty_endpoint_ids() {
@@ -314,8 +333,9 @@ int main() {
                    test_single_mode_rejects_missing_id() &&
                    test_multi_mode_accepts_two_pairs() &&
                    test_multi_mode_accepts_four_pairs() &&
+                   test_multi_mode_accepts_eight_pairs_with_all_optional_suffixes() &&
                    test_multi_mode_rejects_odd_endpoint_count() &&
-                   test_multi_mode_rejects_one_or_five_pairs() &&
+                   test_multi_mode_rejects_one_or_nine_pairs() &&
                    test_multi_mode_rejects_missing_and_empty_endpoint_ids() &&
                    test_multi_mode_rejects_reused_render_endpoint() &&
                    test_multi_mode_rejects_reused_capture_endpoint() &&

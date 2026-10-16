@@ -268,9 +268,9 @@ Result add(const std::wstring& inf_path, const std::wstring& label, Instance& cr
     std::vector<Instance> current;
     result = list(current);
     if (!result.ok) return result;
-    if (current.size() >= kMaximumInstances) {
+    if (!can_add_instance(current.size())) {
         return Result::failure(ERROR_TOO_MANY_NAMES,
-                               L"Driver prototype instance limit reached; remove one first");
+                               L"Experimental adapter limit reached; remove one first");
     }
     for (const Instance& item : current) {
         if (same_id(item.label, label)) {

@@ -29,7 +29,8 @@ WasapiEndpoint endpoint(const std::wstring& instance_id,
 }
 
 InstanceReadiness instance(unsigned number) {
-    const auto suffix = number == 1 ? L"0001" : L"0002";
+    std::wstring suffix = std::to_wstring(number);
+    suffix.insert(0, 4 - suffix.size(), L'0');
     const std::wstring id = std::wstring(L"ROOT\\MEDIA\\") + suffix;
     const std::wstring label = std::wstring(L"Lab ") + suffix;
     InstanceReadiness result;
@@ -85,12 +86,30 @@ bool test_two_instances_produce_four_parented_pairs() {
            plan.buses[3].render_endpoint_id == L"render-headphone-0002";
 }
 
+bool test_four_instances_produce_eight_parented_pairs_in_order() {
+    FleetAudioProbePlan plan;
+    if (!sar::devices::build_fleet_audio_probe_plan(fleet(4), plan) ||
+        plan.buses.size() != 8) return false;
+    for (unsigned index = 0; index < 8; ++index) {
+        std::wstring suffix = std::to_wstring(index / 2 + 1);
+        suffix.insert(0, 4 - suffix.size(), L'0');
+        const bool second_bus = (index % 2) != 0;
+        const auto& bus = plan.buses[index];
+        if (bus.fleet_bus != index || bus.instance_bus != index % 2 ||
+            bus.instance_id != std::wstring(L"ROOT\\MEDIA\\") + suffix ||
+            bus.render_endpoint_id != std::wstring(second_bus
+                ? L"render-headphone-" : L"render-speaker-") + suffix ||
+            bus.capture_endpoint_id != std::wstring(second_bus
+                ? L"capture-2-" : L"capture-1-") + suffix) return false;
+    }
+    return true;
+}
+
 bool test_empty_or_oversized_fleet_is_rejected() {
     FleetAudioProbePlan plan;
     auto empty = fleet(0);
     empty.state = sar::devices::FleetReadinessState::no_instances;
-    FleetReadiness oversized = fleet(2);
-    oversized.instances.push_back(instance(3));
+    FleetReadiness oversized = fleet(5);
     return !sar::devices::build_fleet_audio_probe_plan(empty, plan) &&
            plan.buses.empty() && !plan.error.empty() &&
            !sar::devices::build_fleet_audio_probe_plan(oversized, plan) &&
@@ -185,6 +204,7 @@ bool test_inactive_or_unformatted_endpoints_are_rejected() {
 int main() {
     return test_single_instance_plan_is_deterministic() &&
                    test_two_instances_produce_four_parented_pairs() &&
+                   test_four_instances_produce_eight_parented_pairs_in_order() &&
                    test_empty_or_oversized_fleet_is_rejected() &&
                    test_unstable_or_unready_fleet_is_rejected() &&
                    test_endpoint_parent_must_match_instance() &&

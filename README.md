@@ -192,15 +192,17 @@ For `fleet`, exit code 0 means every adapter is ready in that snapshot. For
 stability window. Exit code 1 means at least one instance is not ready or
 inventory failed, 3 means the readiness timeout expired, and 4 means `fleet`
 found no SAR instances. This is an inventory/readiness check, not an
-audio-transfer test. The prototype still allows at most two adapters, each
-with two fixed render/capture bus pairs; arbitrary channel counts and dynamic
-topology remain future work.
+audio-transfer test. The experimental manager allows at most four adapters,
+each with two fixed stereo render/capture bus pairs, for eight measured bus
+pairs total. This is a management and probe capacity, not evidence that a
+four-adapter audio run has passed stability qualification. Arbitrary channel
+counts and dynamic topology remain future work.
 
 `probe-plan` waits for the same stable fleet window, then maps each adapter's
 two documented render/capture pairs using exact endpoint names and PnP parent
 IDs. It rejects unstable members, duplicate or mis-parented endpoint IDs, and
 anything other than active 48 kHz stereo endpoints. Its JSON bus list is ordered
-for the four-bus signal probe. To run the complete interactive test and retain
+for the eight-bus signal probe. To run the complete interactive test and retain
 machine-readable evidence, use:
 
 ```powershell

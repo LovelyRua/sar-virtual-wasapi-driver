@@ -38,7 +38,8 @@ void usage() {
         << L"  sar_endpoint_manager wait-fleet <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager probe-plan <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager help\n\n"
-        << L"Prototype limit: two instances, each with two fixed render/capture bus pairs.\n"
+        << L"Experimental limit: four instances, each with two fixed render/capture bus pairs.\n"
+        << L"The eight-bus capacity is not a long-duration stability qualification.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
         << L"shared driver packages. It requires elevation for edits.\n";
 }

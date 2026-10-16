@@ -732,9 +732,9 @@ int Run(const sar_driver::WasapiProbeOptions& options) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    std::array<const wchar_t*, 14> arguments{};
+    std::array<const wchar_t*, sar_driver::kMaximumProbeArguments> arguments{};
     if (argc > static_cast<int>(arguments.size())) {
-        std::wcerr << L"Probe accepts at most four endpoint pairs.\n";
+        std::wcerr << L"Probe accepts at most eight endpoint pairs.\n";
         return 1;
     }
     const int copied = std::min(argc, static_cast<int>(arguments.size()));
@@ -745,10 +745,10 @@ int wmain(int argc, wchar_t** argv) {
                                             options, option_error)) {
         std::wcerr << L"Usage: wasapi_dual_bus_probe <render1> <capture1>"
                       L" <render2> <capture2> <seconds>\n"
-                      L"   or: wasapi_dual_bus_probe --single <bus:0..3>"
+                      L"   or: wasapi_dual_bus_probe --single <bus:0..7>"
                       L" <render> <capture> <seconds>\n"
                       L"   or: wasapi_dual_bus_probe --multi <seconds>"
-                      L" <render1> <capture1> ... <render4> <capture4>\n"
+                      L" <render1> <capture1> ... <render8> <capture8>\n"
                       L"Optional suffixes: [--max-level-spread-db <0.1..60>] [--no-mmcss] (either order)\n"
                       L"--no-mmcss disables MMCSS for this diagnostic probe only.\n"
                    << option_error << L'\n';

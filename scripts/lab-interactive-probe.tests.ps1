@@ -11,6 +11,14 @@ $validRender3 = '{0.0.0.00000000}.{55555555-5555-5555-5555-555555555555}'
 $validCapture3 = '{0.0.1.00000000}.{66666666-6666-6666-6666-666666666666}'
 $validRender4 = '{0.0.0.00000000}.{77777777-7777-7777-7777-777777777777}'
 $validCapture4 = '{0.0.1.00000000}.{88888888-8888-8888-8888-888888888888}'
+$validRender5 = '{0.0.0.00000000}.{99999999-9999-9999-9999-999999999999}'
+$validCapture5 = '{0.0.1.00000000}.{99999999-9999-9999-9999-999999999999}'
+$validRender6 = '{0.0.0.00000000}.{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}'
+$validCapture6 = '{0.0.1.00000000}.{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}'
+$validRender7 = '{0.0.0.00000000}.{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}'
+$validCapture7 = '{0.0.1.00000000}.{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}'
+$validRender8 = '{0.0.0.00000000}.{cccccccc-cccc-cccc-cccc-cccccccccccc}'
+$validCapture8 = '{0.0.1.00000000}.{cccccccc-cccc-cccc-cccc-cccccccccccc}'
 
 New-Item -ItemType Directory -Path $root | Out-Null
 Set-Content -LiteralPath $probePath -Value 'placeholder'
@@ -108,19 +116,19 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
 
     $oneExtra = $base.Clone()
     $oneExtra.Mode = 'multi_bus'
-    Assert-Rejected $oneExtra 'Multi-bus mode requires two to four endpoint pairs.'
+    Assert-Rejected $oneExtra 'Multi-bus mode requires two to eight endpoint pairs.'
 
     $mismatched = $base.Clone()
     $mismatched.Mode = 'multi_bus'
     $mismatched.AdditionalRenderIds = @($validRender2, $validRender3)
     $mismatched.AdditionalCaptureIds = @($validCapture2)
-    Assert-Rejected $mismatched 'Multi-bus mode requires two to four endpoint pairs.'
+    Assert-Rejected $mismatched 'Multi-bus mode requires two to eight endpoint pairs.'
 
     $tooMany = $base.Clone()
     $tooMany.Mode = 'multi_bus'
-    $tooMany.AdditionalRenderIds = @($validRender2, $validRender3, $validRender4, $validRender)
-    $tooMany.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4, $validCapture)
-    Assert-Rejected $tooMany 'Multi-bus mode requires two to four endpoint pairs.'
+    $tooMany.AdditionalRenderIds = @($validRender2, $validRender3, $validRender4, $validRender5, $validRender6, $validRender7, $validRender8, $validRender)
+    $tooMany.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4, $validCapture5, $validCapture6, $validCapture7, $validCapture8, $validCapture)
+    Assert-Rejected $tooMany 'Multi-bus mode requires two to eight endpoint pairs.'
 
     $tooSmallLevelLimit = $base.Clone()
     $tooSmallLevelLimit.MaximumLevelSpreadDb = 0.09
@@ -139,11 +147,11 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
         if ($_.Exception.Message -notmatch 'MaximumLevelSpreadDb') { throw }
     }
 
-    $badFourthEndpoint = $base.Clone()
-    $badFourthEndpoint.Mode = 'multi_bus'
-    $badFourthEndpoint.AdditionalRenderIds = @($validRender2, $validRender3, 'bad-endpoint')
-    $badFourthEndpoint.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4)
-    Assert-Rejected $badFourthEndpoint 'Invalid WASAPI endpoint ID:'
+    $badEighthEndpoint = $base.Clone()
+    $badEighthEndpoint.Mode = 'multi_bus'
+    $badEighthEndpoint.AdditionalRenderIds = @($validRender2, $validRender3, $validRender4, $validRender5, $validRender6, $validRender7, 'bad-endpoint')
+    $badEighthEndpoint.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4, $validCapture5, $validCapture6, $validCapture7, $validCapture8)
+    Assert-Rejected $badEighthEndpoint 'Invalid WASAPI endpoint ID:'
 
     $legacyPlusMulti = $base.Clone()
     $legacyPlusMulti.Mode = 'multi_bus'
@@ -155,14 +163,15 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
 
     $multi = $base.Clone()
     $multi.Mode = 'multi_bus'
-    $multi.AdditionalRenderIds = @($validRender2, $validRender3, $validRender4)
-    $multi.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4)
+    $multi.AdditionalRenderIds = @($validRender2, $validRender3, $validRender4, $validRender5, $validRender6, $validRender7, $validRender8)
+    $multi.AdditionalCaptureIds = @($validCapture2, $validCapture3, $validCapture4, $validCapture5, $validCapture6, $validCapture7, $validCapture8)
     & $scriptPath @multi | Out-Null
     $encoded = [regex]::Match($global:SarCapturedActionArgument, '-EncodedCommand ([A-Za-z0-9+/=]+)').Groups[1].Value
     $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
-    $expectedMultiArguments = "--multi 15 '$validRender' '$validCapture' '$validRender2' '$validCapture2' '$validRender3' '$validCapture3' '$validRender4' '$validCapture4'"
+    $allMultiIds = @($validRender, $validCapture, $validRender2, $validCapture2, $validRender3, $validCapture3, $validRender4, $validCapture4, $validRender5, $validCapture5, $validRender6, $validCapture6, $validRender7, $validCapture7, $validRender8, $validCapture8)
+    $expectedMultiArguments = '--multi 15 ' + (($allMultiIds | ForEach-Object { "'$_'" }) -join ' ')
     if (-not $command.Contains($expectedMultiArguments)) {
-        throw "Four-bus launcher generated an unexpected command: $command"
+        throw "Eight-bus launcher generated an unexpected command: $command"
     }
 
     $multiWithLevelLimit = $multi.Clone()
@@ -213,7 +222,7 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
         throw "Single-bus launcher did not forward the diagnostic MMCSS control switch: $command"
     }
 
-    foreach ($boundaryBus in 0, 3) {
+    foreach ($boundaryBus in 0, 7) {
         $boundary = $base.Clone()
         $boundary.Mode = 'single_bus'
         $boundary.BusIndex = $boundaryBus
@@ -233,7 +242,7 @@ $global:SarFakeProbeStatus = 'PROBE_EXIT=0'
 
     $singleWithOutOfRangeBus = $base.Clone()
     $singleWithOutOfRangeBus.Mode = 'single_bus'
-    $singleWithOutOfRangeBus.BusIndex = 4
+    $singleWithOutOfRangeBus.BusIndex = 8
     try {
         & $scriptPath @singleWithOutOfRangeBus | Out-Null
         throw 'Expected BusIndex validation failure.'

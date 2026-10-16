@@ -25,9 +25,9 @@ struct FleetAudioProbePlan {
     bool ready() const noexcept { return error.empty() && !buses.empty(); }
 };
 
-// Produces a deterministic render/capture list for the four-bus WASAPI probe.
-// Endpoint names select the two documented buses; PnP parent IDs establish
-// ownership, so duplicate friendly names across adapters are never guessed.
+// Produces a deterministic render/capture list for up to four adapters and
+// eight total buses. Endpoint names select the two documented buses per
+// adapter; PnP parent IDs establish ownership.
 bool build_fleet_audio_probe_plan(const FleetReadiness& fleet,
                                  FleetAudioProbePlan& plan);
 

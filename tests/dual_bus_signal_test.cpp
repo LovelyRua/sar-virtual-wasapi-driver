@@ -449,6 +449,26 @@ void TestInvalidLevelWindowDoesNotPoisonValidRange() {
 } // namespace
 
 int main() {
+    Expect(sar_driver::kProbeBuses == 8 &&
+               sar_driver::kProbeFrequencies.size() == 8,
+           "fleet probe must expose eight uniquely measured buses");
+    for (std::size_t bus = 0; bus < sar_driver::kProbeFrequencies.size(); ++bus) {
+        for (std::size_t channel = 0; channel < 2; ++channel) {
+            const unsigned frequency = sar_driver::kProbeFrequencies[bus][channel];
+            Expect(frequency > 0 && frequency < kProbeRate / 2,
+                   "every bus tone must be below Nyquist");
+            for (std::size_t other_bus = 0;
+                 other_bus <= bus; ++other_bus) {
+                const std::size_t channel_limit = other_bus == bus ? channel : 2;
+                for (std::size_t other_channel = 0;
+                     other_channel < channel_limit; ++other_channel) {
+                    Expect(frequency !=
+                               sar_driver::kProbeFrequencies[other_bus][other_channel],
+                           "each bus and channel must use a unique spectral bin");
+                }
+            }
+        }
+    }
     TestPairedBuses();
     TestDcOffsetPreservesToneClassification();
     TestProbeToneIsIndependentOfPacketBoundaries();
@@ -469,6 +489,6 @@ int main() {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;
     }
-    std::puts("dual bus signal analysis passed");
+    std::puts("eight bus signal analysis passed");
     return 0;
 }

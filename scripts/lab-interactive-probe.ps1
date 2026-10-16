@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)] [string] $RenderId,
     [Parameter(Mandatory)] [string] $CaptureId,
     [ValidateSet('run', 'default', 'exclusive', 'route', 'single_bus', 'dual_bus', 'multi_bus')] [string] $Mode = 'run',
-    [ValidateRange(0, 3)] [int] $BusIndex = 0,
+    [ValidateRange(0, 7)] [int] $BusIndex = 0,
     [string] $RenderId2,
     [string] $CaptureId2,
     [string[]] $AdditionalRenderIds = @(),
@@ -46,8 +46,8 @@ if ($Mode -eq 'single_bus') {
         throw 'RenderId2 and CaptureId2 cannot be combined with multi_bus mode.'
     }
     if ($AdditionalRenderIds.Count -ne $AdditionalCaptureIds.Count -or
-        $AdditionalRenderIds.Count -lt 1 -or $AdditionalRenderIds.Count -gt 3) {
-        throw 'Multi-bus mode requires two to four endpoint pairs.'
+        $AdditionalRenderIds.Count -lt 1 -or $AdditionalRenderIds.Count -gt 7) {
+        throw 'Multi-bus mode requires two to eight endpoint pairs.'
     }
     for ($index = 0; $index -lt $AdditionalRenderIds.Count; $index++) {
         $ids += @($AdditionalRenderIds[$index], $AdditionalCaptureIds[$index])

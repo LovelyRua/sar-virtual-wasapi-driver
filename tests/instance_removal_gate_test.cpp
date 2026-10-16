@@ -18,6 +18,24 @@ bool test_removal_requires_three_stable_absent_samples() {
     return gate.observe(expected, observed, true) && gate.stable_samples() == 3;
 }
 
+bool test_removing_one_of_four_adapters_keeps_remaining_roster_stable() {
+    InstanceRemovalGate gate(3);
+    const std::vector<std::wstring> remaining{
+        L"ROOT\\MEDIA\\0001", L"ROOT\\MEDIA\\0003", L"ROOT\\MEDIA\\0004"};
+    if (gate.observe(remaining, remaining, true) || gate.stable_samples() != 1) {
+        return false;
+    }
+    if (gate.observe(remaining, remaining, true) || gate.stable_samples() != 2) {
+        return false;
+    }
+    if (!gate.observe(remaining, remaining, true) || gate.stable_samples() != 3) {
+        return false;
+    }
+    const std::vector<std::wstring> unexpected{
+        L"ROOT\\MEDIA\\0001", L"ROOT\\MEDIA\\0002", L"ROOT\\MEDIA\\0003"};
+    return !gate.observe(remaining, unexpected, true) && gate.stable_samples() == 0;
+}
+
 bool test_endpoint_reappearance_resets_removal_window() {
     InstanceRemovalGate gate(3);
     const std::vector<std::wstring> expected{L"ROOT\\MEDIA\\0002"};
@@ -73,6 +91,7 @@ bool test_zero_sample_requirement_is_clamped() {
 
 int main() {
     if (!test_removal_requires_three_stable_absent_samples()) return 1;
+    if (!test_removing_one_of_four_adapters_keeps_remaining_roster_stable()) return 9;
     if (!test_endpoint_reappearance_resets_removal_window()) return 2;
     if (!test_unexpected_adapter_blocks_removal_confirmation()) return 3;
     if (!test_removing_last_instance_allows_stable_empty_roster()) return 4;
