@@ -107,8 +107,12 @@ HRESULT wait_for_fleet_readiness(unsigned timeout_ms, FleetReadiness& readiness)
             snapshot.state = FleetReadinessState::stability_not_confirmed;
         }
         readiness = std::move(snapshot);
-        std::this_thread::sleep_for(
+        const auto delay = bounded_readiness_poll_delay(
+            deadline, std::chrono::steady_clock::now(),
             std::chrono::milliseconds(kReadinessPollIntervalMs));
+        if (delay > std::chrono::steady_clock::duration::zero()) {
+            std::this_thread::sleep_for(delay);
+        }
     } while (std::chrono::steady_clock::now() < deadline);
 
     readiness.inventory_error = HRESULT_FROM_WIN32(ERROR_TIMEOUT);

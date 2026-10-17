@@ -1,5 +1,6 @@
 #include "src/fleet_readiness_gate.h"
 
+#include <chrono>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -93,6 +94,31 @@ bool test_zero_required_samples_is_clamped_to_one() {
            gate.stable_samples() == 1;
 }
 
+bool test_poll_delay_never_exceeds_the_remaining_deadline() {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::time_point{};
+    const auto normal = sar::devices::bounded_readiness_poll_delay(
+        now + std::chrono::seconds(2), now, std::chrono::milliseconds(250));
+    const auto short_deadline = sar::devices::bounded_readiness_poll_delay(
+        now + std::chrono::milliseconds(80), now, std::chrono::milliseconds(250));
+    const auto near_deadline = sar::devices::bounded_readiness_poll_delay(
+        now + std::chrono::milliseconds(100), now + std::chrono::milliseconds(99),
+        std::chrono::milliseconds(250));
+    return normal == std::chrono::milliseconds(250) &&
+           short_deadline == std::chrono::milliseconds(80) &&
+           near_deadline == std::chrono::milliseconds(1);
+}
+
+bool test_expired_deadline_and_zero_interval_do_not_sleep() {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::time_point{};
+    return sar::devices::bounded_readiness_poll_delay(
+               now, now, std::chrono::milliseconds(250)) == Clock::duration::zero() &&
+           sar::devices::bounded_readiness_poll_delay(
+               now + std::chrono::seconds(1), now,
+               std::chrono::milliseconds::zero()) == Clock::duration::zero();
+}
+
 } // namespace
 
 int main() {
@@ -105,6 +131,8 @@ int main() {
     if (!test_roster_addition_or_removal_restarts_the_window()) return 6;
     if (!test_duplicate_ids_invalidate_the_sample_and_reset_history()) return 7;
     if (!test_zero_required_samples_is_clamped_to_one()) return 8;
+    if (!test_poll_delay_never_exceeds_the_remaining_deadline()) return 10;
+    if (!test_expired_deadline_and_zero_interval_do_not_sleep()) return 11;
     std::cout << "Fleet readiness gate tests passed\n";
     return 0;
 }

@@ -82,6 +82,21 @@ bool build_fleet_audio_probe_plan(const FleetReadiness& fleet,
         return false;
     }
 
+    for (std::size_t index = 0; index < fleet.instances.size(); ++index) {
+        const auto& current = fleet.instances[index].instance;
+        for (std::size_t previous = 0; previous < index; ++previous) {
+            const auto& seen = fleet.instances[previous].instance;
+            if (same_id(current.id, seen.id)) {
+                plan.error = L"Each selected adapter must have a unique instance ID.";
+                return false;
+            }
+            if (same_id(current.label, seen.label)) {
+                plan.error = L"Each selected adapter must have a unique device label.";
+                return false;
+            }
+        }
+    }
+
     for (const auto& instance : fleet.instances) {
         if (!instance.ready() || instance.stable_samples < kStableReadinessSamples ||
             instance.instance.id.empty() || instance.instance.label.empty() ||

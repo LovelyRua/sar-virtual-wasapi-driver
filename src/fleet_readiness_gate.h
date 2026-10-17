@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cwctype>
 #include <string>
@@ -8,6 +9,19 @@
 #include <vector>
 
 namespace sar::devices {
+
+inline std::chrono::steady_clock::duration bounded_readiness_poll_delay(
+    std::chrono::steady_clock::time_point deadline,
+    std::chrono::steady_clock::time_point now,
+    std::chrono::milliseconds poll_interval) noexcept {
+    using Clock = std::chrono::steady_clock;
+    if (now >= deadline || poll_interval <= std::chrono::milliseconds::zero()) {
+        return Clock::duration::zero();
+    }
+    const auto interval = std::chrono::duration_cast<Clock::duration>(poll_interval);
+    const auto remaining = deadline - now;
+    return interval < remaining ? interval : remaining;
+}
 
 inline bool same_instance_roster(std::vector<std::wstring> expected,
                                  std::vector<std::wstring> observed) {

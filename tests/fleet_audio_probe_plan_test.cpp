@@ -189,6 +189,24 @@ bool test_duplicate_endpoint_ids_across_instances_are_rejected_case_insensitivel
            plan.buses.empty();
 }
 
+bool test_duplicate_instance_ids_are_rejected_case_insensitively_before_planning() {
+    FleetAudioProbePlan plan;
+    auto input = fleet(2);
+    input.instances[1].instance.id = L"root\\media\\0001";
+    return !sar::devices::build_fleet_audio_probe_plan(input, plan) &&
+           plan.buses.empty() &&
+           plan.error == L"Each selected adapter must have a unique instance ID.";
+}
+
+bool test_duplicate_instance_labels_are_rejected_case_insensitively_before_planning() {
+    FleetAudioProbePlan plan;
+    auto input = fleet(2);
+    input.instances[1].instance.label = L"lAB 0001";
+    return !sar::devices::build_fleet_audio_probe_plan(input, plan) &&
+           plan.buses.empty() &&
+           plan.error == L"Each selected adapter must have a unique device label.";
+}
+
 bool test_inactive_or_unformatted_endpoints_are_rejected() {
     FleetAudioProbePlan plan;
     auto inactive = fleet();
@@ -213,6 +231,8 @@ int main() {
                    test_missing_or_ambiguous_expected_endpoint_is_rejected() &&
                    test_non_stereo_or_non_48khz_endpoint_is_rejected() &&
                    test_duplicate_endpoint_ids_across_instances_are_rejected_case_insensitively() &&
+                   test_duplicate_instance_ids_are_rejected_case_insensitively_before_planning() &&
+                   test_duplicate_instance_labels_are_rejected_case_insensitively_before_planning() &&
                    test_inactive_or_unformatted_endpoints_are_rejected()
                ? 0
                : 1;

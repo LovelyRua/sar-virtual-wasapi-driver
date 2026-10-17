@@ -121,9 +121,14 @@ int main() {
         sustainedLate.EndPass();
     }
     if (sustainedLate.stats().packets != 600 ||
+        sustainedLate.stats().service_passes != 600 ||
+        sustainedLate.stats().packets_with_valid_timestamp != 600 ||
+        sustainedLate.stats().packets_with_future_timestamp != 0 ||
         sustainedLate.stats().packets_over_late_threshold != 600 ||
         sustainedLate.stats().maximum_timestamp_age_100ns != 2501 ||
+        sustainedLate.stats().total_timestamp_age_100ns != 600 * 2501 ||
         sustainedLate.stats().empty_service_passes != 0 ||
+        sustainedLate.stats().maximum_packets_per_pass != 1 ||
         !sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
         return 14;
     }

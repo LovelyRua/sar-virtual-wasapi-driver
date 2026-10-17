@@ -1,5 +1,7 @@
 #pragma once
 
+#include "saturating_counter.h"
+
 #include <cstdint>
 #include <limits>
 
@@ -27,27 +29,27 @@ public:
     bool Observe(std::uint64_t device_position, std::uint64_t qpc_position_100ns,
                  std::uint32_t frames, std::uint32_t sample_rate,
                  bool discontinuity, bool silent, bool timestamp_error) {
-        ++stats_.packets;
+        SaturatingIncrement(stats_.packets);
         bool segment_break = discontinuity || silent || timestamp_error || sample_rate == 0;
-        if (discontinuity) ++stats_.discontinuity_packets;
-        if (silent) ++stats_.silent_packets;
-        if (timestamp_error) ++stats_.timestamp_error_packets;
+        if (discontinuity) SaturatingIncrement(stats_.discontinuity_packets);
+        if (silent) SaturatingIncrement(stats_.silent_packets);
+        if (timestamp_error) SaturatingIncrement(stats_.timestamp_error_packets);
 
         if (have_previous_ && !timestamp_error && sample_rate != 0) {
             const std::uint64_t expected = SaturatingAdd(previous_position_, previous_frames_);
             if (device_position > expected) {
                 segment_break = true;
-                ++stats_.position_gap_packets;
+                SaturatingIncrement(stats_.position_gap_packets);
                 const auto gap = device_position - expected;
-                AddSaturated(stats_.position_gap_frames, gap);
+                SaturatingAdd(stats_.position_gap_frames, gap);
                 if (gap > stats_.maximum_position_gap_frames) {
                     stats_.maximum_position_gap_frames = gap;
                 }
             } else if (device_position < expected) {
                 segment_break = true;
-                ++stats_.position_overlap_packets;
+                SaturatingIncrement(stats_.position_overlap_packets);
                 const auto overlap = expected - device_position;
-                AddSaturated(stats_.position_overlap_frames, overlap);
+                SaturatingAdd(stats_.position_overlap_frames, overlap);
                 if (overlap > stats_.maximum_position_overlap_frames) {
                     stats_.maximum_position_overlap_frames = overlap;
                 }
@@ -55,7 +57,7 @@ public:
 
             if (qpc_position_100ns < previous_qpc_) {
                 segment_break = true;
-                ++stats_.qpc_regressions;
+                SaturatingIncrement(stats_.qpc_regressions);
             } else if (device_position >= previous_position_) {
                 const std::uint64_t position_delta = device_position - previous_position_;
                 const std::uint64_t whole_seconds = position_delta / sample_rate;
@@ -92,16 +94,6 @@ public:
     const CaptureTimelineStats& stats() const { return stats_; }
 
 private:
-    static std::uint64_t SaturatingAdd(std::uint64_t left, std::uint64_t right) {
-        return right > std::numeric_limits<std::uint64_t>::max() - left
-                   ? std::numeric_limits<std::uint64_t>::max()
-                   : left + right;
-    }
-
-    static void AddSaturated(std::uint64_t& target, std::uint64_t amount) {
-        target = SaturatingAdd(target, amount);
-    }
-
     CaptureTimelineStats stats_{};
     std::uint64_t previous_position_ = 0;
     std::uint64_t previous_qpc_ = 0;

@@ -108,6 +108,21 @@ bool test_extreme_positions_saturate_without_wrapping() {
            timeline.stats().packets == 2;
 }
 
+bool test_cumulative_gap_frames_saturate_across_timestamp_epochs() {
+    WasapiCaptureTimeline timeline;
+    const auto maximum = std::numeric_limits<std::uint64_t>::max();
+    const auto gap = (maximum / 4) * 3;
+    timeline.Observe(0, 0, 0, 1, false, false, false);
+    timeline.Observe(gap, 0, 0, 1, false, false, false);
+    timeline.Observe(0, 0, 0, 1, false, false, true);
+    timeline.Observe(0, 0, 0, 1, false, false, false);
+    timeline.Observe(gap, 0, 0, 1, false, false, false);
+    const auto& stats = timeline.stats();
+    return stats.timestamp_error_packets == 1 && stats.position_gap_packets == 2 &&
+           stats.position_gap_frames == maximum &&
+           stats.maximum_position_gap_frames == gap;
+}
+
 bool test_maximum_gap_reports_the_largest_single_event() {
     WasapiCaptureTimeline timeline;
     timeline.Observe(0, 0, 10, 48000, false, false, false);
@@ -224,6 +239,7 @@ int main() {
                    test_timestamp_error_restarts_with_a_clean_reference_packet() &&
                    test_qpc_delta_error_tracks_clock_drift_without_frame_gap() &&
                    test_qpc_delta_saturates_when_frame_delta_exceeds_clock_range() &&
+                   test_cumulative_gap_frames_saturate_across_timestamp_epochs() &&
                    test_discontinuity_is_not_hidden_by_contiguous_followup_packets() &&
                    test_discontinuity_flag_is_independent_of_position_gap() &&
                    test_silent_packets_are_counted_independently_of_discontinuities() &&

@@ -2,6 +2,8 @@
 
 #include "endpoint_readiness.h"
 
+#include "fleet_readiness_gate.h"
+
 #include <algorithm>
 #include <cwctype>
 #include <thread>
@@ -157,7 +159,12 @@ HRESULT wait_for_instance_readiness(const std::wstring& instance_id,
             readiness = std::move(snapshot);
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(kReadinessPollIntervalMs));
+        const auto delay = bounded_readiness_poll_delay(
+            deadline, std::chrono::steady_clock::now(),
+            std::chrono::milliseconds(kReadinessPollIntervalMs));
+        if (delay > std::chrono::steady_clock::duration::zero()) {
+            std::this_thread::sleep_for(delay);
+        }
     } while (std::chrono::steady_clock::now() < deadline);
 
     readiness.stable_samples = consecutive_ready;
