@@ -41,7 +41,7 @@ public:
                 segment_break = true;
                 SaturatingIncrement(stats_.position_gap_packets);
                 const auto gap = device_position - expected;
-                SaturatingAdd(stats_.position_gap_frames, gap);
+                SaturatingAccumulate(stats_.position_gap_frames, gap);
                 if (gap > stats_.maximum_position_gap_frames) {
                     stats_.maximum_position_gap_frames = gap;
                 }
@@ -49,7 +49,7 @@ public:
                 segment_break = true;
                 SaturatingIncrement(stats_.position_overlap_packets);
                 const auto overlap = expected - device_position;
-                SaturatingAdd(stats_.position_overlap_frames, overlap);
+                SaturatingAccumulate(stats_.position_overlap_frames, overlap);
                 if (overlap > stats_.maximum_position_overlap_frames) {
                     stats_.maximum_position_overlap_frames = overlap;
                 }
@@ -94,6 +94,12 @@ public:
     const CaptureTimelineStats& stats() const { return stats_; }
 
 private:
+    static std::uint64_t SaturatingAdd(std::uint64_t left, std::uint64_t right) {
+        return right > std::numeric_limits<std::uint64_t>::max() - left
+                   ? std::numeric_limits<std::uint64_t>::max()
+                   : left + right;
+    }
+
     CaptureTimelineStats stats_{};
     std::uint64_t previous_position_ = 0;
     std::uint64_t previous_qpc_ = 0;

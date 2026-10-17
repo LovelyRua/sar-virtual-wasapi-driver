@@ -14,7 +14,7 @@ constexpr void SaturatingIncrement(Unsigned& value) noexcept {
 }
 
 template <typename Unsigned>
-constexpr void SaturatingAdd(Unsigned& value, Unsigned amount) noexcept {
+constexpr void SaturatingAccumulate(Unsigned& value, Unsigned amount) noexcept {
     static_assert(std::is_integral<Unsigned>::value &&
                       std::is_unsigned<Unsigned>::value,
                   "Saturating counters require an unsigned integer");

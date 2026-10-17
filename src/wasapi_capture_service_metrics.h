@@ -38,7 +38,7 @@ public:
         }
         const std::uint64_t age = serviced_qpc_100ns - packet_qpc_100ns;
         SaturatingIncrement(stats_.packets_with_valid_timestamp);
-        SaturatingAdd(stats_.total_timestamp_age_100ns, age);
+        SaturatingAccumulate(stats_.total_timestamp_age_100ns, age);
         if (age > stats_.maximum_timestamp_age_100ns) {
             stats_.maximum_timestamp_age_100ns = age;
         }
