@@ -20,6 +20,21 @@ primitive with standalone tests. The experimental bridge uses it in the
 kernel stream callbacks. Passing its unit tests or the driver build does not
 prove endpoint audio transfer.
 
+The ring records zero-filled read underruns separately from normal reads,
+including the number of underrun reads and the largest missing frame count.
+When either supported experimental bridge stream stops, it atomically takes
+and resets that bus's counters under the bridge lock, then summarizes a
+nonzero bridge underrun or overflow through the existing PortCls glitch ETW
+event (major glitch codes `4`, `5`, and `6`). Code `4` carries zero-filled
+frames in data 1 and dropped frames in data 2; code `5` carries underrun-read
+count in data 1 and the largest missing-frame count in data 2. Code `6` carries
+rejected read bytes in data 1 and rejected write bytes in data 2. All carry the
+bridge bus index in data 4. These summaries are emitted outside the audio copy
+loop to avoid per-period ETW traffic. Capture a Windows Audio ETW trace while
+running and stopping the lab probe to inspect them. A missing summary is not
+proof of a clean run unless the trace was active and either bridge stream
+reached the stop transition.
+
 The bridge currently connects Speaker render to MicArray1 capture and
 SpeakerHeadphone render to MicArray2 capture as two isolated experimental
 buses. Each uses a fixed 4096-frame ring in nonpaged adapter storage and emits
@@ -77,18 +92,37 @@ build outputs must not be committed.
 The `SysVAD build` workflow restores the upstream pinned WDK NuGet packages
 and compiles `TabletAudioSample` plus the keyword detector adapter required
 by its INF. The optional APO projects are deliberately excluded at this
-stage. CI does not publish or install the generated driver binary.
+stage. Push and pull-request runs compile only and do not publish a driver.
 
 A manually dispatched CI run retains a three-day build-evidence artifact with
-the driver binary, INF-required adapter DLL, generated INF/catalog files if
-present, and SHA-256 hashes.
-It also runs Inf2Cat for Windows 11 25H2 x64 over a self-contained
-`core-package/` directory containing the core INF, SYS, adapter DLL, and
-unsigned `sysvad.cat`. Catalog generation checks package signability but does
-not sign the catalog or make the package installable under normal boot policy.
-It is not a release or an installable package: CI's temporary signing identity
-is not provisioned on the driver lab. Build and sign locally inside the
-dedicated lab before attempting endpoint installation.
+the driver binary, INF-required adapter DLL, generated INF/catalog files, and
+the endpoint manager and two WASAPI probes. The same run builds those lab tools
+and runs the complete CTest suite before upload. It also records SHA-256 hashes.
+The workflow runs Inf2Cat for Windows 11 25H2 x64, signs the
+self-contained `core-package/` catalog using an ephemeral seven-day
+code-signing certificate, and verifies the signature before upload. The
+private key exists only on the ephemeral CI runner; the artifact contains the
+public `.cer` file.
+
+This is a test-signed SysVAD experiment package, not a SAR release or a
+production-trusted driver. Use it only on the disposable VM24 driver lab while
+test-signing mode is enabled. Import `SAR-Lab-TestSigning.cer` into the lab's
+Local Machine `Root` and `TrustedPublisher` stores from an elevated PowerShell
+session, then run the normal lab preflight and endpoint-manager install checks:
+
+```powershell
+Import-Certificate -FilePath .\SAR-Lab-TestSigning.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\SAR-Lab-TestSigning.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+.\scripts\lab-preflight.ps1 -PackagePath .\core-package
+.\sar_endpoint_manager.exe add .\core-package\ComponentizedAudioSample.inf "VM24 Bridge Diagnostics"
+```
+
+The manager prints the created PnP instance ID and waits for endpoint readiness.
+Run the WASAPI probes from a logged-on desktop session. After the experiment,
+remove that specific instance with
+`.\sar_endpoint_manager.exe remove <instance-id> --confirm`, then remove the
+certificate thumbprint listed in `LAB-ONLY.txt` from both machine stores. Do
+not reuse or distribute this identity.
 
 On the lab, run `scripts/lab-preflight.ps1 -PackagePath <core-package>` to
 record the package hashes, administrator token, Secure Boot, test-signing, and
@@ -118,6 +152,75 @@ status, endpoint IDs, and state-specific diagnostic guidance. `diagnose` is a
 point-in-time snapshot; `wait-ready` polls for up to 120 seconds and returns
 success only after stable readiness.
 
+For a deterministic instance teardown, opt in to waiting after removal. The
+manager records the instance's current WASAPI endpoint IDs, removes only that
+SAR PnP instance, then waits until the PnP roster matches the pre-removal roster
+minus that instance and its associated or previously observed endpoints are
+gone for three consecutive samples:
+
+```bat
+sar_endpoint_manager.exe remove ROOT\MEDIA\0001 --confirm --wait-ms 30000
+sar_endpoint_manager.exe remove ROOT\MEDIA\0001 --confirm --wait-ms 30000 --json
+```
+
+Exit code `0` means the expected remaining SAR roster and endpoint teardown
+were stable. Exit code `3` means removal was requested but teardown did not
+reach that state before timeout; inspect `state`, `remainingEndpointCount`,
+`unassociatedEndpointCount`, and roster counts in JSON. The wait form fails
+closed without removing the device if any enumerated WASAPI endpoint cannot be
+attributed to a PnP parent; it cannot safely prove teardown in that state.
+Other exit codes indicate an input, inventory, or PnP removal error. A timeout
+does not reinstall the device or remove its shared driver package. The legacy
+`remove <id> --confirm` remains an immediate PnP removal request without
+endpoint-disappearance confirmation.
+
+For a multi-instance check, `fleet` reports every present SAR adapter using
+one PnP roster and one shared WASAPI endpoint snapshot. `wait-fleet` succeeds
+only when every listed instance is ready and the exact same instance-ID set
+remains ready for three consecutive samples; a new or removed adapter restarts
+that stability window. An empty fleet never reports ready. Use the JSON form
+for installer or GUI orchestration:
+
+```bat
+sar_endpoint_manager.exe fleet --json
+sar_endpoint_manager.exe wait-fleet 30000 --json
+sar_endpoint_manager.exe probe-plan 30000 --json
+```
+
+For `fleet`, exit code 0 means every adapter is ready in that snapshot. For
+`wait-fleet`, exit code 0 additionally means the fleet stayed ready across the
+stability window. Exit code 1 means at least one instance is not ready or
+inventory failed, 3 means the readiness timeout expired, and 4 means `fleet`
+found no SAR instances. This is an inventory/readiness check, not an
+audio-transfer test. The experimental manager allows at most four adapters,
+each with two fixed stereo render/capture bus pairs, for eight measured bus
+pairs total. This is a management and probe capacity, not evidence that a
+four-adapter audio run has passed stability qualification. Arbitrary channel
+counts and dynamic topology remain future work.
+
+`probe-plan` waits for the same stable fleet window, then maps each adapter's
+two documented render/capture pairs using exact endpoint names and PnP parent
+IDs. It rejects unstable members, duplicate or mis-parented endpoint IDs, and
+anything other than active 48 kHz stereo endpoints. Its JSON bus list is ordered
+for the eight-bus signal probe. To run the complete interactive test and retain
+machine-readable evidence, use:
+
+```powershell
+scripts/lab-fleet-audio-probe.ps1 `
+  -EndpointManagerPath .\sar_endpoint_manager.exe `
+  -ProbePath .\wasapi_dual_bus_probe.exe `
+  -DurationSeconds 60 `
+  -MaximumLevelSpreadDb 1.0 `
+  -OutputPath C:\SARLab\fleet-audio-report.json
+```
+
+The runner executes the probe in the logged-on desktop session, checks the
+actual probe exit status, and records the stable plan plus raw per-bus output.
+The launcher uses a per-run scheduled-task name so simultaneous lab runs do not
+replace or unregister each other's task. This test measures audio passing
+through each virtual bus independently; it does not establish cross-adapter
+mixing or arbitrary dynamic channel topology.
+
 After installing the experimental driver in the dedicated lab, build the
 standalone user-mode probes with CMake and run them in an interactive audio
 session. They use WASAPI event-driven buffering, so service cadence follows
@@ -138,6 +241,35 @@ build\Release\wasapi_bridge_probe.exe --exclusive "<Speaker render ID>" "<MicArr
 build\Release\wasapi_dual_bus_probe.exe "<Bus 0 render ID>" "<Bus 0 capture ID>" "<Bus 1 render ID>" "<Bus 1 capture ID>" 15
 ```
 
+The multi-bus probe reports per-channel minimum/maximum tone level and the
+cross-window spread in dBFS. This content-level diagnostic is independent of
+the strict packet-continuity result. The strict gate evaluates only the span
+after the one-second warmup and requires zero WASAPI discontinuity flags,
+timestamp errors, device-position gaps, and overlaps, plus the minimum measured
+frame counts. A packet crossing the warmup boundary is clipped to its first
+measured frame before its position/QPC is compared. The summary reports both
+whole-run timeline diagnostics and measured-span continuity counters, including
+the largest single position gap/overlap in frames. To opt into an additional stability gate,
+append `--max-level-spread-db <0.1..60>` after the normal arguments; for
+example, `wasapi_dual_bus_probe.exe --multi 60 <render0> <capture0> <render1> <capture1> --max-level-spread-db 6`. Enabling the level gate also requires
+at least ten valid 100 ms RMS windows for every measured second (`duration - 2`);
+the two excluded seconds are the probe's existing warmup/tail allowance. The
+probe reports both the observed and required window counts. A run can
+therefore pass signal content while failing continuity, level stability, or
+level-window coverage. The optional level limit defaults to disabled and does
+not relax the zero-discontinuity gate.
+When capture reports a discontinuity, silence, timestamp error, device-position
+gap/overlap, or QPC regression, the probe starts a fresh signal-analysis window
+and discards any incomplete frames from the previous segment. Per-bus summaries
+report segment-break count, discarded frames, and trailing partial frames. This
+keeps spectral and level measurements from combining samples across a known
+timeline break; it does not hide or forgive the corresponding continuity failure.
+For a scheduling control run, append `--no-mmcss` to disable MMCSS only for this
+diagnostic probe. MMCSS remains enabled by default; the output distinguishes
+`mmcss_requested` from `mmcss_registered`, and disabling it never changes any
+content, level, or continuity acceptance threshold. Do not use this switch as a
+product or driver configuration setting.
+
 The multi-bus probe can also run inside the already logged-on desktop session
 through the interactive launcher. It reports packet cadence, discontinuities,
 silence, peak level, clipping, and non-finite sample counts for each bus:
@@ -145,12 +277,13 @@ silence, peak level, clipping, and non-finite sample counts for each bus:
 ```powershell
 scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode dual_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -RenderId2 "<Bus 1 render ID>" -CaptureId2 "<Bus 1 capture ID>" -DurationSeconds 15 -OutputPath <report.txt>
 scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode multi_bus -RenderId "<Bus 0 render ID>" -CaptureId "<Bus 0 capture ID>" -AdditionalRenderIds @("<Bus 1 render ID>", "<Bus 2 render ID>", "<Bus 3 render ID>") -AdditionalCaptureIds @("<Bus 1 capture ID>", "<Bus 2 capture ID>", "<Bus 3 capture ID>") -DurationSeconds 15 -OutputPath <report.txt>
+scripts/lab-interactive-probe.ps1 -ProbePath <wasapi_dual_bus_probe.exe> -Mode single_bus -RenderId "<render ID>" -CaptureId "<capture ID>" -DurationSeconds 60 -MaximumLevelSpreadDb 1 -DisableMmcss -OutputPath <control.txt>
 ```
 
 For a single isolated bus, use `-Mode single_bus -BusIndex 0` (indices 0..3).
 This launches the probe's `--single` mode in the logged-on desktop session and
 is useful for repeatable one-endpoint-pair controls without constructing a
-second virtual endpoint pair.
+second virtual endpoint pair. Omit `-DisableMmcss` for the treatment arm.
 
 The probe requests 48 kHz, 16-bit stereo. `--run` and `--exclusive` request
 RAW capture; `--default` and `--route` use ordinary shared-mode capture without RAW.
@@ -489,8 +622,9 @@ multi-bus probe. It reports position gaps/overlaps, timestamp errors, QPC
 regressions, and maximum frame-clock/QPC delta error in addition to the
 `DATA_DISCONTINUITY` flag. The tracker has deterministic tests for contiguous
 packets, gaps, overlaps, invalid timestamps, QPC regressions, and arithmetic
-bounds. The probe does not use these diagnostic values to relax its strict
-zero-discontinuity acceptance gate.
+bounds. The strict gate now consumes measured-span discontinuity, timestamp,
+gap, and overlap evidence; whole-run startup diagnostics remain visible without
+letting warmup events produce false failures.
 
 The first VM24 runs exposed a measurement issue: the probe synchronously
 printed every discontinuity from the capture servicing thread. Commit
@@ -593,3 +727,126 @@ Checks confirmed the VB-Cable-only Media inventory was restored, no matching
 temporary certificate remained in LocalMachine My/Root/TrustedPublisher,
 firewall profiles remained enabled, and the previously authorized lab boot
 mode (Secure Boot off, test signing on) was unchanged.
+
+## Strict capture silence gate follow-up (2026-10-11)
+
+The measured-span continuity gate now rejects any WASAPI silent-buffer flag.
+This probe sends a known tone, and startup warmup packets remain excluded from
+the measured span; a brief silent packet must not be hidden by a passing
+one-second spectral window. The gate also rejects regressing QPC timestamps;
+clock-rate delta error remains diagnostic, but backward time is not valid
+continuity evidence. Capture-service latency remains diagnostic and cannot
+override these content/timeline failures. Regression coverage was added across
+the timeline, warmup tracker, continuity gate, service metrics, and dual-bus
+signal test modules. The preceding gate change passed CI on 2026-10-12: 10/10
+CTest cases, 5 endpoint inventory parser tests, 14 interactive-probe argument
+tests, and the pinned SysVAD driver build. This follow-up adds explicit
+continuity failure reason flags and per-bus probe output without changing the
+strict pass criteria; validation is pending.
+
+The VM24 Windows 11 lab currently has VB-Audio Virtual Cable but no SAR audio
+endpoints. The CI dual-bus probe was run against CABLE Input -> CABLE Output in
+the logged-in desktop session. Both a 15-second and a 60-second baseline
+produced signal with no silent capture packets, timestamp errors, QPC
+regressions, clipping, or non-finite samples, but both failed the strict
+continuity gate: the 15-second run measured 5 position-gap packets / 3,360
+frames; the 60-second run measured 30 / 62,880 frames (largest gap 20,544
+frames). The 60-second content check had 57 valid windows, below its required
+58; its configured level-spread check itself passed. These are VB-Cable lab
+results, not SAR-driver validation; investigate this baseline/timing behavior
+before treating a VM24 loopback run as a clean continuity acceptance test. The
+manually dispatched driver artifact contains unsigned SysVAD lab build evidence
+and is not an installable SAR release package.
+
+After adding reason output, another 15-second VM24 run reported
+`continuity_failure_reasons=discontinuity,position_gap`: one measured
+discontinuity and one 384-frame (8 ms) position gap. Signal analysis, level,
+timestamp, silent-packet, and QPC checks passed in that run. The changing gap
+counts across repeated runs indicate intermittent VM/loopback timing behavior,
+not a stable SAR endpoint result.
+
+## MMCSS probe scheduling and VB-Cable baseline (2026-10-13)
+
+The WASAPI probe now registers its event-servicing thread with MMCSS `Pro Audio`
+and falls back to `Audio`. Registration is scoped and reverted when the probe
+exits; failure is reported and does not relax the continuity gate. The Windows
+CI run passed 11/11 CTest cases, 5 endpoint-inventory cases, and 21 interactive
+launcher cases. The launcher can now forward the probe's optional maximum
+level-spread threshold (default remains disabled).
+
+On VM24, the same logged-in desktop and VB-Cable `CABLE Input` -> `CABLE
+Output` path were tested with the previous CI probe (without MMCSS) and the
+new CI probe. The no-MMCSS 60-second run failed continuity with 19 measured
+discontinuities and 14 position-gap packets / 14,016 gap frames. With MMCSS,
+two 60-second runs reported zero measured discontinuities and zero position
+gaps; one also passed a 1 dB level-spread limit with 59 valid windows, 0.151 dB
+left / 0.267 dB right spread, and zero silent frames. A separate MMCSS run
+without a level limit observed 2.557 dB right-channel spread despite passing
+continuity, which is why the explicit level gate matters. A 15-second MMCSS
+run also had zero continuity failures.
+
+The historical comparison used binaries from different CI builds and is
+therefore preliminary, not a clean causal A/B. Keep executable, endpoint IDs,
+duration, desktop session, and level threshold identical between runs; use an
+interleaved order such as control/treatment/treatment/control and retain every
+report. It is not proof of a SAR-driver fix: VM24 still has no SAR audio endpoint
+in this test, and more repeated same-binary A/B runs are needed before treating
+the scheduling change as causal or the route as production-stable. The complete logs remain on VM24
+under `C:\sar-lab\mmcss-20261013-01`; temporary executables, scripts, and the
+interactive scheduled task were removed after testing.
+
+### Same-binary interleaved result (2026-10-13)
+
+The diagnostic-only `--no-mmcss` switch now permits a fair comparison without
+changing binaries. On VM24, four valid 60-second controls and four valid
+60-second MMCSS runs used the same probe executable from build `666063f`, the
+same interactive desktop, 48 kHz VB-Cable loopback endpoint pair, and a 1 dB
+level-spread gate. One balanced control/treatment/treatment/control block was
+completed; two additional valid samples per arm were retained as repeats. One
+earlier control attempt produced no report because the scheduled task vanished
+during polling; it was excluded and prompted a launcher race fix.
+
+All four no-MMCSS controls had content pass and zero silent frames, but all
+failed continuity: 21-29 discontinuities, 17-21 measured position-gap packets,
+and 9,888-16,032 missing frames. All four MMCSS runs had zero discontinuities,
+zero position-gap packets/frames, and zero silent frames. This is strong,
+repeatable evidence that MMCSS scheduling materially improves event servicing
+for this VM's VB-Cable loopback path, but it is not proof of a SAR endpoint or
+driver fix: VM24 had no SAR audio endpoint in the inventory.
+
+The level result is separate: only one of four controls and three of four MMCSS
+runs passed the 1 dB level gate. One MMCSS run had 1.60 dB left and 2.08 dB
+right spread despite perfect timeline continuity. Therefore MMCSS must not be
+treated as a level-stability fix. Full reports are retained on VM24 in
+`C:\sar-lab\mmcss-ab-666063f`; the interactive scheduled task was removed after
+each run, and no driver or boot-security settings were changed.
+
+## Experimental two-bus install and repeat (2026-10-13)
+
+CI artifact `38370749217` was signature-checked and installed on VM24 as the
+experimental `ROOT\MEDIA\0001` instance. The endpoint manager reached stable
+readiness and exposed two render plus two capture endpoints at 48 kHz, stereo
+float. This verifies PnP installation and WASAPI enumeration, not a release
+driver or SAR engine/GUI integration.
+
+The 60-second dual-bus probe had content and timeline continuity pass on both
+buses: no silent frames, discontinuities, timestamp errors, device-position
+gaps, overlaps, or QPC regressions. The separate 1 dB level gate failed on bus
+0 right at 2.059 dB spread; bus 0 left was 0.009 dB and bus 1 was 0.00001 dB or
+less on both channels. A bus 1 single-bus repeat passed the same gate at 0.203
+dB left / 0.026 dB right. Bus 0 single-bus repeats were not consistent: one
+had 2.530 dB right-channel spread without a timeline gap, while another had a
+single 384-frame position gap and a 19.061 dB right-channel spread.
+
+The same 60-second probe against VB-Cable on VM24 had zero timeline failures,
+but also failed the 1 dB level gate at 8.861 dB right-channel spread. This
+control means the lab's virtualized WASAPI path is not currently a reliable
+level-stability reference. Do not attribute every bus 0 anomaly to the sample
+driver, and do not claim the driver passed a stability or soak test. Keep the
+strict gates and investigate the VM baseline before drawing a causal conclusion.
+
+The per-run logs remain under `C:\SARLab\38370749217` on VM24. After testing,
+the exact experimental device, its `oem12.inf` package, the temporary signing
+certificate in Local Machine `Root` and `TrustedPublisher`, and the interactive
+probe task were removed. Secure Boot remains disabled and test signing remains
+enabled as previously authorized for this dedicated lab VM.

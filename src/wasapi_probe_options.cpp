@@ -1,6 +1,7 @@
 #include "src/wasapi_probe_options.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cwchar>
 #include <cwctype>
 #include <utility>
@@ -60,7 +61,7 @@ bool set_duration(const wchar_t* text, WasapiProbeOptions& options,
 bool set_pairs(const wchar_t* const* ids, std::size_t pair_count,
                WasapiProbeOptions& options, std::wstring& error) {
     if (pair_count < 1 || pair_count > kMaximumProbeBuses) {
-        error = L"Probe requires one to four render/capture pairs.";
+        error = L"Probe requires one to eight render/capture pairs.";
         return false;
     }
     for (std::size_t pair = 0; pair < pair_count; ++pair) {
@@ -87,6 +88,64 @@ bool set_pairs(const wchar_t* const* ids, std::size_t pair_count,
     return true;
 }
 
+bool parse_level_limit(const wchar_t* text, double& value) {
+    if (text == nullptr || *text == L'\0') return false;
+    wchar_t* end = nullptr;
+    errno = 0;
+    value = std::wcstod(text, &end);
+    return errno == 0 && end != text && *end == L'\0' && std::isfinite(value) &&
+           value >= 0.1 && value <= 60.0;
+}
+
+void apply_level_coverage_requirement(WasapiProbeOptions& options) {
+    options.minimum_level_windows = options.maximum_level_spread_db > 0.0
+        ? MinimumLevelWindowsForDuration(options.duration_seconds)
+        : 0;
+}
+
+bool strip_optional_arguments(int& argc, const wchar_t* const* argv,
+                              WasapiProbeOptions& options,
+                              std::wstring& error) {
+    bool saw_level_limit = false;
+    bool saw_mmcss_toggle = false;
+    while (argc > 1) {
+        const wchar_t* tail = argv[argc - 1];
+        if (tail == nullptr) break;
+        if (std::wcscmp(tail, L"--no-mmcss") == 0) {
+            if (saw_mmcss_toggle) {
+                error = L"--no-mmcss may only be specified once.";
+                return false;
+            }
+            saw_mmcss_toggle = true;
+            options.enable_mmcss = false;
+            --argc;
+            continue;
+        }
+        if (std::wcscmp(tail, L"--max-level-spread-db") == 0) {
+            error = L"Level spread limit must be a number from 0.1 to 60 dB.";
+            return false;
+        }
+        if (argc > 2 && argv[argc - 2] != nullptr &&
+            std::wcscmp(argv[argc - 2], L"--max-level-spread-db") == 0) {
+            if (saw_level_limit) {
+                error = L"--max-level-spread-db may only be specified once.";
+                return false;
+            }
+            double value = 0.0;
+            if (!parse_level_limit(tail, value)) {
+                error = L"Level spread limit must be a number from 0.1 to 60 dB.";
+                return false;
+            }
+            saw_level_limit = true;
+            options.maximum_level_spread_db = value;
+            argc -= 2;
+            continue;
+        }
+        break;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
@@ -99,27 +158,35 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
         return false;
     }
     WasapiProbeOptions candidate;
+    if (!strip_optional_arguments(argc, argv, candidate, error)) return false;
+    if (argc < 2) {
+        error = L"Missing probe arguments.";
+        return false;
+    }
 
     if (std::wcscmp(argv[1], L"--single") == 0) {
         unsigned bus = 0;
         if (argc != 6 || !parse_unsigned(argv[2], 0,
                                          static_cast<unsigned>(kMaximumProbeBuses - 1),
                                          bus)) {
-            error = L"Single mode requires a bus index from 0 to 3.";
+            error = L"Single mode requires a bus index from 0 to 7.";
             return false;
         }
         if (!set_duration(argv[5], candidate, error) ||
             !set_pairs(argv + 3, 1, candidate, error)) {
             return false;
         }
+        apply_level_coverage_requirement(candidate);
         candidate.first_bus = bus;
         options = std::move(candidate);
         return true;
     }
 
     if (std::wcscmp(argv[1], L"--multi") == 0) {
-        if (argc < 7 || argc > 11 || (argc - 3) % 2 != 0) {
-            error = L"Multi mode requires two to four render/capture pairs.";
+        if (argc < 7 ||
+            argc > static_cast<int>(kMaximumProbeArguments) ||
+            (argc - 3) % 2 != 0) {
+            error = L"Multi mode requires two to eight render/capture pairs.";
             return false;
         }
         const std::size_t pair_count = static_cast<std::size_t>((argc - 3) / 2);
@@ -127,6 +194,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
             !set_pairs(argv + 3, pair_count, candidate, error)) {
             return false;
         }
+        apply_level_coverage_requirement(candidate);
         options = std::move(candidate);
         return true;
     }
@@ -139,6 +207,7 @@ bool ParseWasapiProbeOptions(int argc, const wchar_t* const* argv,
         !set_pairs(argv + 1, 2, candidate, error)) {
         return false;
     }
+    apply_level_coverage_requirement(candidate);
     options = std::move(candidate);
     return true;
 }

@@ -6,10 +6,16 @@
 #include <wrl/client.h>
 
 #include "src/dual_bus_signal.h"
+#include "src/capture_signal_window_assembler.h"
 #include "src/wasapi_event_pump.h"
 #include "src/signal_window_queue.h"
 #include "src/wasapi_capture_timeline.h"
 #include "src/wasapi_capture_service_metrics.h"
+#include "src/wasapi_capture_continuity_tracker.h"
+#include "src/wasapi_capture_continuity_gate.h"
+#include "src/mmcss_audio_thread.h"
+#include "src/signal_level_monitor.h"
+#include "src/signal_rms_window_analyzer.h"
 #include "src/wasapi_probe_options.h"
 
 #include <algorithm>
@@ -40,6 +46,31 @@ void Check(HRESULT result, const char* operation) {
                   << static_cast<unsigned long>(result) << std::dec << '\n';
         throw std::runtime_error(operation);
     }
+}
+
+void WriteContinuityFailureReasons(
+    std::ostream& output, sar_driver::CaptureContinuityFailure failures) {
+    if (failures == sar_driver::CaptureContinuityFailure::none) {
+        output << "none";
+        return;
+    }
+    bool first = true;
+    const auto append = [&](const char* name, sar_driver::CaptureContinuityFailure failure) {
+        if (!sar_driver::HasCaptureContinuityFailure(failures, failure)) return;
+        if (!first) output << ',';
+        output << name;
+        first = false;
+    };
+    append("discontinuity", sar_driver::CaptureContinuityFailure::discontinuity);
+    append("silent_packet", sar_driver::CaptureContinuityFailure::silent_packet);
+    append("timestamp_error", sar_driver::CaptureContinuityFailure::timestamp_error);
+    append("qpc_regression", sar_driver::CaptureContinuityFailure::qpc_regression);
+    append("position_gap", sar_driver::CaptureContinuityFailure::position_gap);
+    append("position_overlap", sar_driver::CaptureContinuityFailure::position_overlap);
+    append("insufficient_capture_frames",
+           sar_driver::CaptureContinuityFailure::insufficient_capture_frames);
+    append("insufficient_render_frames",
+           sar_driver::CaptureContinuityFailure::insufficient_render_frames);
 }
 
 WAVEFORMATEXTENSIBLE RenderFormat() {
@@ -93,6 +124,9 @@ class StreamPair {
 public:
     using AnalysisQueue = sar_driver::SignalWindowQueue<
         sar_driver::kProbeRate, sar_driver::kProbeChannels, 4>;
+    using WindowAssembler = sar_driver::CaptureSignalWindowAssembler<AnalysisQueue>;
+    using ShortLevelAnalyzer = sar_driver::SignalRmsWindowAnalyzer<
+        sar_driver::kProbeRate / 10>;
 
     ~StreamPair() {
         Stop();
@@ -152,7 +186,6 @@ public:
         for (unsigned frame = 0; frame < sar_driver::kProbeRate; ++frame) {
             toneTable_.push_back(sar_driver::ProbeFrame(bus_, frame));
         }
-        warmupFrames_ = sar_driver::kProbeRate;
     }
 
     void StartAnalyzer() {
@@ -167,6 +200,14 @@ public:
             analysis_event_ = nullptr;
             throw;
         }
+    }
+
+    void SetMaximumLevelSpread(double value) {
+        maximum_level_spread_db_ = value;
+    }
+
+    void SetMinimumLevelWindows(std::size_t value) {
+        minimum_level_windows_ = value;
     }
 
     void StopAnalyzer() noexcept {
@@ -271,16 +312,25 @@ public:
                               (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
                               silent,
                               (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
+            auto continuityPacket = continuity_tracker_.Observe(
+                devicePosition, qpcPosition, frames,
+                (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
+                silent, (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
+            if (continuityPacket.segment_break) {
+                ++analysis_segment_breaks_;
+                window_assembler_.DiscardPartialSegment();
+                short_level_analyzer_.DiscardPartialSegment();
+            }
             ++capturePackets_;
             if (frames > maximumPacketFrames_) maximumPacketFrames_ = frames;
             if (silent) ++silentPackets_;
             if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0 &&
-                warmupFrames_ == 0) {
+                continuityPacket.measured_frames != 0) {
                 ++discontinuities_;
             }
             for (UINT32 frame = 0; frame < frames; ++frame) {
-                if (warmupFrames_ != 0) {
-                    --warmupFrames_;
+                if (continuityPacket.warmup_frames != 0) {
+                    --continuityPacket.warmup_frames;
                     continue;
                 }
                 float frame_samples[2]{};
@@ -292,20 +342,15 @@ public:
                         value = reinterpret_cast<const std::int16_t*>(bytes)
                                     [frame * 2 + channel] / 32768.0f;
                     }
-                    if (!std::isfinite(value)) value = 0.0f;
                     frame_samples[channel] = value;
                 }
-                pending_window_[pending_frames_ * 2] = frame_samples[0];
-                pending_window_[pending_frames_ * 2 + 1] = frame_samples[1];
-                if (++pending_frames_ == sar_driver::kProbeRate) {
-                    if (analysis_queue_.try_push(pending_window_.data(),
-                                                 pending_window_.size())) {
-                        if (!SetEvent(analysis_event_)) {
-                            analysis_signal_failures_.fetch_add(
-                                1, std::memory_order_relaxed);
-                        }
+                short_level_analyzer_.AppendFrame(frame_samples[0], frame_samples[1]);
+                if (window_assembler_.AppendFrame(
+                        frame_samples[0], frame_samples[1], analysis_queue_)) {
+                    if (!SetEvent(analysis_event_)) {
+                        analysis_signal_failures_.fetch_add(
+                            1, std::memory_order_relaxed);
                     }
-                    pending_frames_ = 0;
                 }
             }
             capturedFrames_ += frames;
@@ -335,17 +380,26 @@ public:
                 [this](const float* samples, std::size_t) {
                     const auto result = sar_driver::AnalyzeSignalWindow(
                         samples, sar_driver::kProbeRate, bus_);
+                    level_monitor_.Observe(result.expected_power, windows_ + 1);
                     ++windows_;
                     if (!result.passed()) ++failed_windows_;
                     const std::lock_guard<std::mutex> lock(g_analysis_output_mutex);
                     std::cout << "bus=" << bus_ << " window=" << windows_
                               << " left=" << result.expected_power[0]
                               << " right=" << result.expected_power[1]
+                              << " level_left_dbfs="
+                              << sar_driver::SignalLevelStats::power_dbfs(
+                                     result.expected_power[0])
+                              << " level_right_dbfs="
+                              << sar_driver::SignalLevelStats::power_dbfs(
+                                     result.expected_power[1])
                               << " channel_leak_left=" << result.wrong_channel_power[0]
                               << " channel_leak_right=" << result.wrong_channel_power[1]
                               << " bus_leak_left=" << result.other_bus_power[0]
                               << " bus_leak_right=" << result.other_bus_power[1]
                               << " peak=" << result.peak_absolute_sample
+                              << " level_spread_left_db=" << level_monitor_.stats().spread_db(0)
+                              << " level_spread_right_db=" << level_monitor_.stats().spread_db(1)
                               << " clipped_samples=" << result.clipped_samples
                               << " non_finite_samples=" << result.non_finite_samples
                               << " passed=" << static_cast<int>(result.passed()) << '\n';
@@ -360,24 +414,54 @@ public:
     }
 
     bool ContentPassed(unsigned seconds) const {
-        return windows_ >= seconds - 2 && failed_windows_ == 0 &&
+        return windows_ >= seconds - sar_driver::kProbeUnmeasuredSeconds &&
+               failed_windows_ == 0 &&
                analysis_queue_.dropped_windows() == 0 &&
                analysis_queue_.invalid_pushes() == 0 &&
                analysis_signal_failures_.load(std::memory_order_relaxed) == 0 &&
                analysis_wait_failures_.load(std::memory_order_relaxed) == 0;
     }
 
-    bool ContinuityPassed(unsigned seconds) const {
-        return discontinuities_ == 0 &&
-               capturedFrames_ >= sar_driver::kProbeRate * (seconds - 2) &&
-               sentFrames_ >= sar_driver::kProbeRate * (seconds - 2);
+    bool LevelPassed() const {
+        return ShortLevelPassed();
     }
 
-    void Summary() const {
+    bool ShortLevelCoveragePassed() const {
+        return maximum_level_spread_db_ <= 0.0 ||
+               sar_driver::LevelWindowCoveragePassed(
+                   short_level_analyzer_.stats().valid_windows,
+                   minimum_level_windows_);
+    }
+
+    bool ToneLevelPassed() const {
+        return maximum_level_spread_db_ <= 0.0 ||
+               level_monitor_.WithinSpread(maximum_level_spread_db_);
+    }
+
+    bool ShortLevelPassed() const {
+        return maximum_level_spread_db_ <= 0.0 ||
+               (ShortLevelCoveragePassed() &&
+                short_level_analyzer_.WithinSpread(maximum_level_spread_db_,
+                                                   minimum_level_windows_));
+    }
+
+    bool ContinuityPassed(unsigned seconds) const {
+        return sar_driver::CaptureContinuityPassed(
+            continuity_tracker_.stats(), continuity_tracker_.measured_frames(), sentFrames_,
+            sar_driver::kProbeRate *
+                (seconds - sar_driver::kProbeUnmeasuredSeconds));
+    }
+
+    void Summary(unsigned seconds) const {
         const auto& timeline = timeline_.stats();
         const auto& service = service_metrics_.stats();
+        const auto continuityFailures = sar_driver::CaptureContinuityFailures(
+            continuity_tracker_.stats(), continuity_tracker_.measured_frames(), sentFrames_,
+            sar_driver::kProbeRate * (seconds - 2));
         const auto meanPacketAge = service.packets_with_valid_timestamp == 0 ? 0 :
             service.total_timestamp_age_100ns / service.packets_with_valid_timestamp;
+        const auto& levels = level_monitor_.stats();
+        const auto& shortLevels = short_level_analyzer_.stats();
         std::cout << "bus=" << bus_ << " sent_frames=" << sentFrames_
                   << " captured_frames=" << capturedFrames_
                   << " silent_frames=" << silentFrames_
@@ -389,8 +473,29 @@ public:
                   << " timestamp_errors=" << timeline.timestamp_error_packets
                   << " position_gap_packets=" << timeline.position_gap_packets
                   << " position_gap_frames=" << timeline.position_gap_frames
+                  << " maximum_position_gap_frames="
+                  << timeline.maximum_position_gap_frames
                   << " position_overlap_packets=" << timeline.position_overlap_packets
                   << " position_overlap_frames=" << timeline.position_overlap_frames
+                  << " maximum_position_overlap_frames="
+                  << timeline.maximum_position_overlap_frames
+                  << " measured_captured_frames=" << continuity_tracker_.measured_frames()
+                  << " measured_discontinuities="
+                  << continuity_tracker_.stats().discontinuity_packets
+                  << " measured_timestamp_errors="
+                  << continuity_tracker_.stats().timestamp_error_packets
+                  << " measured_position_gap_packets="
+                  << continuity_tracker_.stats().position_gap_packets
+                  << " measured_position_gap_frames="
+                  << continuity_tracker_.stats().position_gap_frames
+                  << " measured_maximum_position_gap_frames="
+                  << continuity_tracker_.stats().maximum_position_gap_frames
+                  << " measured_position_overlap_packets="
+                  << continuity_tracker_.stats().position_overlap_packets
+                  << " measured_position_overlap_frames="
+                  << continuity_tracker_.stats().position_overlap_frames
+                  << " measured_maximum_position_overlap_frames="
+                  << continuity_tracker_.stats().maximum_position_overlap_frames
                   << " qpc_regressions=" << timeline.qpc_regressions
                   << " max_qpc_delta_error_100ns="
                   << timeline.maximum_qpc_delta_error_100ns
@@ -405,12 +510,84 @@ public:
                   << service.packets_with_future_timestamp
                   << " windows=" << windows_
                   << " failed_windows=" << failed_windows_
+                  << " analysis_segment_breaks=" << analysis_segment_breaks_
+                  << " discarded_segment_frames="
+                  << window_assembler_.discarded_segment_frames()
+                  << " trailing_partial_frames=" << window_assembler_.pending_frames()
+                  << " completed_analysis_windows="
+                  << window_assembler_.completed_windows()
+                  << " rejected_analysis_windows="
+                  << window_assembler_.rejected_windows()
+                  << " valid_level_windows=" << levels.valid_windows
+                  << " invalid_level_windows=" << levels.invalid_windows
+                  << " min_level_left_dbfs=" << levels.minimum_dbfs(0)
+                  << " min_level_left_window=";
+        if (levels.minimum_window[0] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.minimum_window[0];
+        }
+        std::cout << " max_level_left_dbfs=" << levels.maximum_dbfs(0)
+                  << " max_level_left_window=";
+        if (levels.maximum_window[0] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.maximum_window[0];
+        }
+        std::cout << " level_spread_left_db=" << levels.spread_db(0)
+                  << " min_level_right_dbfs=" << levels.minimum_dbfs(1)
+                  << " min_level_right_window=";
+        if (levels.minimum_window[1] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.minimum_window[1];
+        }
+        std::cout << " max_level_right_dbfs=" << levels.maximum_dbfs(1)
+                  << " max_level_right_window=";
+        if (levels.maximum_window[1] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << levels.maximum_window[1];
+        }
+        std::cout << " level_spread_right_db=" << levels.spread_db(1)
+                  << " short_level_window_frames=" << sar_driver::kProbeRate / 10
+                  << " short_level_valid_windows=" << shortLevels.valid_windows
+                  << " short_level_invalid_windows=" << shortLevels.invalid_windows
+                  << " short_level_discarded_frames="
+                  << short_level_analyzer_.discarded_segment_frames()
+                  << " short_level_min_left_dbfs=" << shortLevels.minimum_dbfs(0)
+                  << " short_level_min_left_window=";
+        if (shortLevels.minimum_window[0] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << shortLevels.minimum_window[0];
+        }
+        std::cout << " short_level_spread_left_db=" << shortLevels.spread_db(0)
+                  << " short_level_min_right_dbfs=" << shortLevels.minimum_dbfs(1)
+                  << " short_level_min_right_window=";
+        if (shortLevels.minimum_window[1] == sar_driver::SignalLevelStats::kNoWindow) {
+            std::cout << "none";
+        } else {
+            std::cout << shortLevels.minimum_window[1];
+        }
+        std::cout << " short_level_spread_right_db=" << shortLevels.spread_db(1)
+                  << " short_level_minimum_required_windows="
+                  << minimum_level_windows_
+                  << " short_level_coverage_passed="
+                  << static_cast<int>(ShortLevelCoveragePassed())
+                  << " short_level_passed=" << static_cast<int>(ShortLevelPassed())
+                  << " tone_level_passed=" << static_cast<int>(ToneLevelPassed())
+                  << " level_limit_db=" << maximum_level_spread_db_
+                  << " level_passed=" << static_cast<int>(LevelPassed())
                   << " dropped_analysis_windows=" << analysis_queue_.dropped_windows()
                   << " invalid_analysis_windows=" << analysis_queue_.invalid_pushes()
                   << " analysis_signal_failures="
                   << analysis_signal_failures_.load(std::memory_order_relaxed)
                   << " analysis_wait_failures="
-                  << analysis_wait_failures_.load(std::memory_order_relaxed) << '\n';
+                  << analysis_wait_failures_.load(std::memory_order_relaxed)
+                  << " continuity_failure_reasons=";
+        WriteContinuityFailureReasons(std::cout, continuityFailures);
+        std::cout << '\n';
     }
 
 private:
@@ -431,13 +608,14 @@ private:
     UINT32 maximumPacketFrames_ = 0;
     unsigned discontinuities_ = 0;
     sar_driver::WasapiCaptureTimeline timeline_;
+    sar_driver::WasapiCaptureContinuityTracker continuity_tracker_{
+        sar_driver::kProbeRate, sar_driver::kProbeRate};
     sar_driver::WasapiCaptureServiceMetrics service_metrics_;
     std::uint64_t capture_period_100ns_ = 0;
     std::uint64_t qpc_frequency_ = 0;
-    std::size_t warmupFrames_ = 0;
-    std::array<float, AnalysisQueue::kSamplesPerWindow> pending_window_{};
-    std::size_t pending_frames_ = 0;
     AnalysisQueue analysis_queue_;
+    WindowAssembler window_assembler_;
+    ShortLevelAnalyzer short_level_analyzer_;
     HANDLE analysis_event_ = nullptr;
     std::thread analyzer_;
     std::atomic_bool stop_analyzer_{false};
@@ -445,6 +623,10 @@ private:
     std::atomic_uint64_t analysis_wait_failures_{0};
     unsigned windows_ = 0;
     unsigned failed_windows_ = 0;
+    std::uint64_t analysis_segment_breaks_ = 0;
+    double maximum_level_spread_db_ = 0.0;
+    std::size_t minimum_level_windows_ = 0;
+    sar_driver::SignalLevelMonitor level_monitor_;
     bool renderStarted_ = false;
     bool captureStarted_ = false;
     Clock::time_point lastPacket_{};
@@ -453,8 +635,11 @@ private:
     std::vector<std::array<std::int16_t, 2>> toneTable_;
 };
 
-int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
-        unsigned seconds) {
+int Run(const sar_driver::WasapiProbeOptions& options) {
+    const auto* ids = options.endpoint_ids.data();
+    const auto pairCount = static_cast<unsigned>(options.pair_count);
+    const auto firstBus = options.first_bus;
+    const auto seconds = options.duration_seconds;
     if (pairCount == 0 || pairCount > sar_driver::kMaximumProbeBuses ||
         firstBus + pairCount > sar_driver::kProbeBuses) {
         throw std::runtime_error("Invalid WASAPI probe bus range");
@@ -478,8 +663,13 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
         throw std::runtime_error("Prepare WASAPI event buffer failed: " +
                                  std::to_string(GetLastError()));
     }
+    const sar_driver::ScopedMmcssAudioThread audioThread(options.enable_mmcss);
     try {
-        for (auto& stream : streams) stream.StartAnalyzer();
+        for (auto& stream : streams) {
+            stream.SetMaximumLevelSpread(options.maximum_level_spread_db);
+            stream.SetMinimumLevelWindows(options.minimum_level_windows);
+            stream.StartAnalyzer();
+        }
         for (auto& stream : streams) stream.StartCapture();
         for (auto& stream : streams) stream.StartRender();
         for (const auto& stream : streams) {
@@ -512,17 +702,28 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
         for (auto& stream : streams) stream.StopAnalyzer();
         throw;
     }
-    for (const auto& stream : streams) stream.Summary();
+    for (const auto& stream : streams) stream.Summary(seconds);
     bool contentPassed = true;
     bool continuityPassed = true;
+    bool levelPassed = true;
     for (const auto& stream : streams) {
         contentPassed = stream.ContentPassed(seconds) && contentPassed;
         continuityPassed = stream.ContinuityPassed(seconds) && continuityPassed;
+        levelPassed = stream.LevelPassed() && levelPassed;
     }
-    const bool passed = contentPassed && continuityPassed;
+    const bool passed = contentPassed && continuityPassed && levelPassed;
     std::cout << "multi_bus_probe passed=" << static_cast<int>(passed)
+              << " mmcss_requested=" << static_cast<int>(options.enable_mmcss)
+              << " mmcss_registered=" << static_cast<int>(audioThread.registered())
+              << " mmcss_task="
+              << (audioThread.task_name() == nullptr ? "none" :
+                  (std::wcscmp(audioThread.task_name(), L"Pro Audio") == 0
+                       ? "Pro Audio" : "Audio"))
+              << " mmcss_error=" << audioThread.last_error()
               << " content_passed=" << static_cast<int>(contentPassed)
               << " continuity_passed=" << static_cast<int>(continuityPassed)
+              << " level_limit_db=" << options.maximum_level_spread_db
+              << " level_passed=" << static_cast<int>(levelPassed)
               << " active_buses=" << pairCount
               << " duration_seconds=" << seconds << '\n';
     return passed ? 0 : 3;
@@ -531,9 +732,9 @@ int Run(const wchar_t* const* ids, unsigned pairCount, unsigned firstBus,
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    std::array<const wchar_t*, 11> arguments{};
+    std::array<const wchar_t*, sar_driver::kMaximumProbeArguments> arguments{};
     if (argc > static_cast<int>(arguments.size())) {
-        std::wcerr << L"Probe accepts at most four endpoint pairs.\n";
+        std::wcerr << L"Probe accepts at most eight endpoint pairs.\n";
         return 1;
     }
     const int copied = std::min(argc, static_cast<int>(arguments.size()));
@@ -544,10 +745,12 @@ int wmain(int argc, wchar_t** argv) {
                                             options, option_error)) {
         std::wcerr << L"Usage: wasapi_dual_bus_probe <render1> <capture1>"
                       L" <render2> <capture2> <seconds>\n"
-                      L"   or: wasapi_dual_bus_probe --single <bus:0..3>"
+                      L"   or: wasapi_dual_bus_probe --single <bus:0..7>"
                       L" <render> <capture> <seconds>\n"
                       L"   or: wasapi_dual_bus_probe --multi <seconds>"
-                      L" <render1> <capture1> ... <render4> <capture4>\n"
+                      L" <render1> <capture1> ... <render8> <capture8>\n"
+                      L"Optional suffixes: [--max-level-spread-db <0.1..60>] [--no-mmcss] (either order)\n"
+                      L"--no-mmcss disables MMCSS for this diagnostic probe only.\n"
                    << option_error << L'\n';
         return 1;
     }
@@ -559,9 +762,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     int result = 1;
     try {
-        result = Run(options.endpoint_ids.data(),
-                     static_cast<unsigned>(options.pair_count),
-                     options.first_bus, options.duration_seconds);
+        result = Run(options);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
     }

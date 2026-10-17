@@ -9,10 +9,11 @@ namespace sar_driver {
 
 constexpr unsigned kProbeRate = 48000;
 constexpr std::size_t kProbeChannels = 2;
-constexpr std::size_t kProbeBuses = 4;
+constexpr std::size_t kProbeBuses = 8;
 constexpr double kProbePi = 3.14159265358979323846;
 constexpr std::array<std::array<unsigned, 2>, kProbeBuses> kProbeFrequencies{{
-    {{997, 1501}}, {{2309, 3001}}, {{4001, 5003}}, {{6007, 7001}}
+    {{997, 1501}}, {{2309, 3001}}, {{4001, 5003}}, {{6007, 7001}},
+    {{8009, 9001}}, {{10007, 11003}}, {{12007, 13001}}, {{14009, 15013}}
 }};
 
 struct SignalWindow {

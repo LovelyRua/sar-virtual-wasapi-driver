@@ -3,16 +3,24 @@ param(
     [Parameter(Mandatory)] [string] $RenderId,
     [Parameter(Mandatory)] [string] $CaptureId,
     [ValidateSet('run', 'default', 'exclusive', 'route', 'single_bus', 'dual_bus', 'multi_bus')] [string] $Mode = 'run',
-    [ValidateRange(0, 3)] [int] $BusIndex = 0,
+    [ValidateRange(0, 7)] [int] $BusIndex = 0,
     [string] $RenderId2,
     [string] $CaptureId2,
     [string[]] $AdditionalRenderIds = @(),
     [string[]] $AdditionalCaptureIds = @(),
     [ValidateRange(5, 3600)] [int] $DurationSeconds = 15,
+    [ValidateRange(0, 60)] [double] $MaximumLevelSpreadDb = 0,
+    [switch] $DisableMmcss,
     [Parameter(Mandatory)] [string] $OutputPath
 )
 
 $ErrorActionPreference = 'Stop'
+if ($MaximumLevelSpreadDb -gt 0 -and $MaximumLevelSpreadDb -lt 0.1) {
+    throw 'MaximumLevelSpreadDb must be zero or between 0.1 and 60 dB.'
+}
+if ($DisableMmcss -and $Mode -notin @('single_bus', 'dual_bus', 'multi_bus')) {
+    throw 'DisableMmcss is only valid for single_bus, dual_bus, and multi_bus probe modes.'
+}
 if (-not (Test-Path -LiteralPath $ProbePath -PathType Leaf)) {
     throw "Probe not found: $ProbePath"
 }
@@ -38,8 +46,8 @@ if ($Mode -eq 'single_bus') {
         throw 'RenderId2 and CaptureId2 cannot be combined with multi_bus mode.'
     }
     if ($AdditionalRenderIds.Count -ne $AdditionalCaptureIds.Count -or
-        $AdditionalRenderIds.Count -lt 1 -or $AdditionalRenderIds.Count -gt 3) {
-        throw 'Multi-bus mode requires two to four endpoint pairs.'
+        $AdditionalRenderIds.Count -lt 1 -or $AdditionalRenderIds.Count -gt 7) {
+        throw 'Multi-bus mode requires two to eight endpoint pairs.'
     }
     for ($index = 0; $index -lt $AdditionalRenderIds.Count; $index++) {
         $ids += @($AdditionalRenderIds[$index], $AdditionalCaptureIds[$index])
@@ -55,23 +63,43 @@ foreach ($id in $ids) {
         throw "Invalid WASAPI endpoint ID: $id"
     }
 }
+for ($index = 0; $index -lt $ids.Count; $index++) {
+    $flowPrefix = if (($index % 2) -eq 0) { '{0.0.0.00000000}.' } else { '{0.0.1.00000000}.' }
+    if (-not $ids[$index].StartsWith($flowPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $flow = if (($index % 2) -eq 0) { 'render' } else { 'capture' }
+        throw "Endpoint pair $([Math]::Floor($index / 2)) requires a $flow endpoint at position $index."
+    }
+}
+$seenEndpointIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($id in $ids) {
+    if (-not $seenEndpointIds.Add($id)) {
+        throw "Endpoint IDs must be unique across the probe: $id"
+    }
+}
 if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue |
           Where-Object SessionId -gt 0)) {
     throw 'No interactive desktop session is logged on.'
 }
 
-$taskName = 'SARLab-InteractiveAudioProbe'
+$taskName = "SARLab-InteractiveAudioProbe-$([guid]::NewGuid().ToString('N'))"
+$maximumReportBytes = 16MB
 $probeLiteral = $ProbePath.Replace("'", "''")
 $outputLiteral = $OutputPath.Replace("'", "''")
+$levelLimit = ''
+if ($MaximumLevelSpreadDb -gt 0) {
+    $levelValue = $MaximumLevelSpreadDb.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+    $levelLimit = " --max-level-spread-db $levelValue"
+}
+$mmcssOption = if ($DisableMmcss) { ' --no-mmcss' } else { '' }
 if ($Mode -eq 'single_bus') {
-    $command = "& '$probeLiteral' --single $BusIndex '$RenderId' '$CaptureId' $DurationSeconds *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' --single $BusIndex '$RenderId' '$CaptureId' $DurationSeconds$levelLimit$mmcssOption *> '$outputLiteral'; "
 } elseif ($Mode -eq 'dual_bus') {
-    $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' '$RenderId' '$CaptureId' '$RenderId2' '$CaptureId2' $DurationSeconds$levelLimit$mmcssOption *> '$outputLiteral'; "
 } elseif ($Mode -eq 'multi_bus') {
     $quotedIds = @($ids | ForEach-Object { "'$_'" }) -join ' '
-    $command = "& '$probeLiteral' --multi $DurationSeconds $quotedIds *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' --multi $DurationSeconds $quotedIds$levelLimit$mmcssOption *> '$outputLiteral'; "
 } else {
-    $command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId' *> '$outputLiteral'; "
+    $command = "& '$probeLiteral' --$Mode '$RenderId' '$CaptureId'$levelLimit$mmcssOption *> '$outputLiteral'; "
 }
 $command +=
            "'PROBE_EXIT=' + `$LASTEXITCODE | Add-Content -LiteralPath '$outputLiteral'"
@@ -86,15 +114,54 @@ try {
     Start-ScheduledTask -TaskName $taskName
     $deadline = (Get-Date).AddSeconds($DurationSeconds + 30)
     do {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        $reportExists = Test-Path -LiteralPath $OutputPath
+        if ($reportExists -and (Get-Item -LiteralPath $OutputPath).Length -gt $maximumReportBytes) {
+            throw "Interactive probe report exceeds the $maximumReportBytes-byte limit."
+        }
+        if ($reportExists -and ($null -eq $task -or $task.State -ne 'Running')) { break }
+        if ((Get-Date) -ge $deadline) {
+            if ($null -eq $task) { throw 'Interactive task disappeared before writing a probe report.' }
+            throw 'Interactive probe timed out.'
+        }
         Start-Sleep -Milliseconds 500
-        $task = Get-ScheduledTask -TaskName $taskName
-    } while (($task.State -eq 'Running' -or -not (Test-Path -LiteralPath $OutputPath)) -and
-             (Get-Date) -lt $deadline)
-    if ((Get-Date) -ge $deadline) { throw 'Interactive probe timed out.' }
+    } while ($true)
     if (-not (Test-Path -LiteralPath $OutputPath)) {
         throw "Interactive task completed without a probe report: $((Get-ScheduledTaskInfo -TaskName $taskName).LastTaskResult)"
     }
-    Get-Content -LiteralPath $OutputPath
+    if ((Get-Item -LiteralPath $OutputPath).Length -gt $maximumReportBytes) {
+        throw "Interactive probe report exceeds the $maximumReportBytes-byte limit."
+    }
+    $probeOutput = @(Get-Content -LiteralPath $OutputPath)
+    $probeOutput
+    $probeExitCodes = @()
+    foreach ($line in $probeOutput) {
+        if ([string]$line -match '^PROBE_EXIT=(\d+)$') {
+            $probeExitCodes += [int]$Matches[1]
+        }
+    }
+    if ($probeExitCodes.Count -ne 1) {
+        throw 'Interactive probe report must contain exactly one PROBE_EXIT status line.'
+    }
+    if ($probeExitCodes[0] -ne 0) {
+        throw "WASAPI probe failed with exit code $($probeExitCodes[0])."
+    }
 } finally {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($null -ne $task -and $task.State -eq 'Running') {
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            $stopDeadline = (Get-Date).AddSeconds(5)
+            do {
+                $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+                if ($null -eq $task -or $task.State -ne 'Running') { break }
+                if ((Get-Date) -ge $stopDeadline) {
+                    throw 'Interactive probe task did not stop after cleanup was requested.'
+                }
+                Start-Sleep -Milliseconds 100
+            } while ($true)
+        }
+    } finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
 }

@@ -62,14 +62,14 @@ bool test_numeric_arguments_require_ascii_decimal_digits() {
 }
 
 bool test_single_mode_accepts_last_bus() {
-    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"3", L"r3", L"c3", L"5"}};
+    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"7", L"r7", L"c7", L"5"}};
     sar_driver::WasapiProbeOptions options;
     return parse(args.data(), 6, options) && options.pair_count == 1 &&
-           options.first_bus == 3 && options.endpoint_ids[0] == args[3];
+           options.first_bus == 7 && options.endpoint_ids[0] == args[3];
 }
 
 bool test_single_mode_rejects_out_of_range_bus() {
-    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"4", L"r", L"c", L"5"}};
+    const std::array<const wchar_t*, 6> args{{L"probe", L"--single", L"8", L"r", L"c", L"5"}};
     sar_driver::WasapiProbeOptions options;
     return !parse(args.data(), 6, options);
 }
@@ -94,17 +94,36 @@ bool test_multi_mode_accepts_four_pairs() {
            options.endpoint_ids[6] == args[9] && options.endpoint_ids[7] == args[10];
 }
 
+bool test_multi_mode_accepts_eight_pairs_with_all_optional_suffixes() {
+    const std::array<const wchar_t*, sar_driver::kMaximumProbeArguments> args{{
+        L"probe", L"--multi", L"60",
+        L"r0", L"c0", L"r1", L"c1", L"r2", L"c2", L"r3", L"c3",
+        L"r4", L"c4", L"r5", L"c5", L"r6", L"c6", L"r7", L"c7",
+        L"--max-level-spread-db", L"6.5", L"--no-mmcss"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(args.data(), static_cast<int>(args.size()), options) &&
+           options.pair_count == 8 && options.endpoint_ids[0] == args[3] &&
+           options.endpoint_ids[14] == args[17] &&
+           options.endpoint_ids[15] == args[18] &&
+           options.maximum_level_spread_db == 6.5 && !options.enable_mmcss;
+}
+
 bool test_multi_mode_rejects_odd_endpoint_count() {
     const std::array<const wchar_t*, 8> args{{L"probe", L"--multi", L"10", L"r0", L"c0", L"r1", L"c1", L"extra"}};
     sar_driver::WasapiProbeOptions options;
     return !parse(args.data(), 8, options);
 }
 
-bool test_multi_mode_rejects_one_or_five_pairs() {
+bool test_multi_mode_rejects_one_or_nine_pairs() {
     const std::array<const wchar_t*, 5> one{{L"probe", L"--multi", L"10", L"r0", L"c0"}};
-    const std::array<const wchar_t*, 13> five{{L"probe", L"--multi", L"10", L"r0", L"c0", L"r1", L"c1", L"r2", L"c2", L"r3", L"c3", L"r4", L"c4"}};
+    const std::array<const wchar_t*, 21> nine{{
+        L"probe", L"--multi", L"10",
+        L"r0", L"c0", L"r1", L"c1", L"r2", L"c2", L"r3", L"c3",
+        L"r4", L"c4", L"r5", L"c5", L"r6", L"c6", L"r7", L"c7",
+        L"r8", L"c8"}};
     sar_driver::WasapiProbeOptions options;
-    return !parse(one.data(), 5, options) && !parse(five.data(), 13, options);
+    return !parse(one.data(), 5, options) &&
+           !parse(nine.data(), static_cast<int>(nine.size()), options);
 }
 
 bool test_multi_mode_rejects_missing_and_empty_endpoint_ids() {
@@ -195,6 +214,112 @@ bool test_null_mode_argument_is_rejected_and_clears_error_state() {
            options.endpoint_ids[0] == nullptr && error == L"Missing probe arguments.";
 }
 
+bool test_level_spread_limit_is_optional_and_bounded() {
+    const std::array<const wchar_t*, 8> enabled{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"6.5"}};
+    const std::array<const wchar_t*, 8> too_small{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"0.09"}};
+    const std::array<const wchar_t*, 8> too_large{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"60.1"}};
+    const std::array<const wchar_t*, 8> non_finite{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"nan"}};
+    sar_driver::WasapiProbeOptions options;
+    if (!parse(enabled.data(), static_cast<int>(enabled.size()), options) ||
+        options.maximum_level_spread_db != 6.5 || options.pair_count != 1 ||
+        options.minimum_level_windows != 130) return false;
+    if (parse(too_small.data(), static_cast<int>(too_small.size()), options) ||
+        options.maximum_level_spread_db != 0.0 || options.pair_count != 0) return false;
+    if (parse(too_large.data(), static_cast<int>(too_large.size()), options) ||
+        parse(non_finite.data(), static_cast<int>(non_finite.size()), options)) return false;
+    return !parse(enabled.data(), 7, options) && options.pair_count == 0;
+}
+
+bool test_level_spread_suffix_works_for_legacy_and_multi_modes() {
+    const std::array<const wchar_t*, 8> legacy{{L"probe", L"r0", L"c0", L"r1",
+        L"c1", L"15", L"--max-level-spread-db", L"12"}};
+    const std::array<const wchar_t*, 9> multi{{L"probe", L"--multi", L"15", L"r0",
+        L"c0", L"r1", L"c1", L"--max-level-spread-db", L"12"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(legacy.data(), static_cast<int>(legacy.size()), options) &&
+           options.pair_count == 2 && options.maximum_level_spread_db == 12.0 &&
+           options.minimum_level_windows == 130 &&
+           parse(multi.data(), static_cast<int>(multi.size()), options) &&
+           options.pair_count == 2 && options.maximum_level_spread_db == 12.0 &&
+           options.minimum_level_windows == 130;
+}
+
+bool test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() {
+    const std::array<const wchar_t*, 9> trailing{{L"probe", L"--single", L"1",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"1.0", L"extra"}};
+    sar_driver::WasapiProbeOptions options;
+    options.pair_count = 1;
+    options.maximum_level_spread_db = 3.0;
+    if (parse(trailing.data(), static_cast<int>(trailing.size()), options)) return false;
+    return options.pair_count == 0 && options.maximum_level_spread_db == 0.0 &&
+           options.endpoint_ids[0] == nullptr;
+}
+
+bool test_level_spread_inclusive_limits_and_default_reset() {
+    const std::array<const wchar_t*, 8> minimum{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"0.1"}};
+    const std::array<const wchar_t*, 8> maximum{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"60"}};
+    const std::array<const wchar_t*, 6> omitted{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(minimum.data(), static_cast<int>(minimum.size()), options) &&
+           options.maximum_level_spread_db == 0.1 &&
+           options.minimum_level_windows == 130 &&
+           parse(maximum.data(), static_cast<int>(maximum.size()), options) &&
+           options.maximum_level_spread_db == 60.0 &&
+           options.minimum_level_windows == 130 &&
+           parse(omitted.data(), static_cast<int>(omitted.size()), options) &&
+           options.maximum_level_spread_db == 0.0 &&
+           options.minimum_level_windows == 0;
+}
+
+bool test_mmcss_is_enabled_by_default_and_can_be_disabled() {
+    const std::array<const wchar_t*, 6> defaults{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15"}};
+    const std::array<const wchar_t*, 7> disabled{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--no-mmcss"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(defaults.data(), static_cast<int>(defaults.size()), options) &&
+           options.enable_mmcss &&
+           parse(disabled.data(), static_cast<int>(disabled.size()), options) &&
+           !options.enable_mmcss && options.pair_count == 1;
+}
+
+bool test_mmcss_and_level_suffixes_are_order_independent() {
+    const std::array<const wchar_t*, 9> mmcss_then_level{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--no-mmcss",
+        L"--max-level-spread-db", L"1.25"}};
+    const std::array<const wchar_t*, 9> level_then_mmcss{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"1.25",
+        L"--no-mmcss"}};
+    sar_driver::WasapiProbeOptions options;
+    return parse(mmcss_then_level.data(), static_cast<int>(mmcss_then_level.size()), options) &&
+           !options.enable_mmcss && options.maximum_level_spread_db == 1.25 &&
+           parse(level_then_mmcss.data(), static_cast<int>(level_then_mmcss.size()), options) &&
+           !options.enable_mmcss && options.maximum_level_spread_db == 1.25;
+}
+
+bool test_duplicate_or_malformed_optional_arguments_fail_closed() {
+    const std::array<const wchar_t*, 8> duplicate_mmcss{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--no-mmcss", L"--no-mmcss"}};
+    const std::array<const wchar_t*, 7> missing_level{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db"}};
+    const std::array<const wchar_t*, 10> duplicate_level{{L"probe", L"--single", L"0",
+        L"render", L"capture", L"15", L"--max-level-spread-db", L"1",
+        L"--max-level-spread-db", L"2"}};
+    sar_driver::WasapiProbeOptions options;
+    options.pair_count = 4;
+    return !parse(duplicate_mmcss.data(), static_cast<int>(duplicate_mmcss.size()), options) &&
+           options.pair_count == 0 && options.enable_mmcss &&
+           !parse(missing_level.data(), static_cast<int>(missing_level.size()), options) &&
+           !parse(duplicate_level.data(), static_cast<int>(duplicate_level.size()), options);
+}
+
 }  // namespace
 
 int main() {
@@ -208,8 +333,9 @@ int main() {
                    test_single_mode_rejects_missing_id() &&
                    test_multi_mode_accepts_two_pairs() &&
                    test_multi_mode_accepts_four_pairs() &&
+                   test_multi_mode_accepts_eight_pairs_with_all_optional_suffixes() &&
                    test_multi_mode_rejects_odd_endpoint_count() &&
-                   test_multi_mode_rejects_one_or_five_pairs() &&
+                   test_multi_mode_rejects_one_or_nine_pairs() &&
                    test_multi_mode_rejects_missing_and_empty_endpoint_ids() &&
                    test_multi_mode_rejects_reused_render_endpoint() &&
                    test_multi_mode_rejects_reused_capture_endpoint() &&
@@ -219,6 +345,13 @@ int main() {
                    test_invalid_reused_endpoint_does_not_publish_partial_options() &&
                    test_failure_clears_previously_published_options() &&
                    test_null_mode_argument_is_rejected_and_clears_error_state() &&
+                   test_level_spread_limit_is_optional_and_bounded() &&
+                   test_level_spread_suffix_works_for_legacy_and_multi_modes() &&
+                   test_level_spread_suffix_rejects_trailing_arguments_and_clears_state() &&
+                   test_level_spread_inclusive_limits_and_default_reset() &&
+                   test_mmcss_is_enabled_by_default_and_can_be_disabled() &&
+                   test_mmcss_and_level_suffixes_are_order_independent() &&
+                   test_duplicate_or_malformed_optional_arguments_fail_closed() &&
                    test_null_argument_array_is_rejected()
                ? 0
                : 1;

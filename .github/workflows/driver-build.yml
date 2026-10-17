@@ -34,9 +34,38 @@ jobs:
         run: >-
           msbuild audio/sysvad/TabletAudioSample/TabletAudioSample.vcxproj
           /p:Configuration=Release /p:Platform=x64 /m /v:minimal
-      - name: Collect lab build evidence
+      - name: Build lab tools and run CTest
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          Write-Host 'Configuring lab tools'
+          cmake -S . -B lab-tools-build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Lab tools CMake configure failed' }
+          Write-Host 'Building all test and lab tool targets'
+          cmake --build lab-tools-build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Lab tools build failed' }
+          Write-Host 'Running all CTest modules'
+          ctest --test-dir lab-tools-build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Transport tests failed while preparing the lab package' }
+
+      - name: Run PowerShell lab orchestration tests
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          foreach ($testPath in @(
+            'scripts/lab-endpoint-inventory.tests.ps1'
+            'scripts/lab-interactive-probe.tests.ps1'
+            'scripts/lab-fleet-audio-probe.tests.ps1'
+          )) {
+            Write-Host "Running $testPath"
+            & $testPath
+            if (-not $?) { throw "PowerShell test failed: $testPath" }
+          }
+
+      - name: Collect package and generate catalog
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh
+        timeout-minutes: 5
         run: |
           $output = 'audio/sysvad/TabletAudioSample/x64/Release'
           $driver = Join-Path $output 'TabletAudioSample.sys'
@@ -50,6 +79,11 @@ jobs:
             Where-Object { $_.Extension -in '.sys', '.inf', '.cat' } |
             ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $evidence }
           Copy-Item -LiteralPath $adapter[0].FullName -Destination $evidence
+          foreach ($name in @('sar_endpoint_manager.exe', 'wasapi_bridge_probe.exe', 'wasapi_dual_bus_probe.exe')) {
+            $toolPath = Join-Path (Join-Path $PWD 'lab-tools-build/Release') $name
+            if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) { throw "Missing lab tool: $name" }
+            Copy-Item -LiteralPath $toolPath -Destination $evidence
+          }
           $package = Join-Path $evidence 'core-package'
           New-Item -ItemType Directory -Path $package | Out-Null
           foreach ($name in @('ComponentizedAudioSample.inf', 'TabletAudioSample.sys', 'KeywordDetectorContosoAdapter.dll')) {
@@ -62,7 +96,7 @@ jobs:
           )
           foreach ($root in @('C:/Program Files (x86)/Windows Kits/10/bin', 'C:/Program Files/Windows Kits/10/bin')) {
             if (Test-Path -LiteralPath $root -PathType Container) {
-              foreach ($version in Get-ChildItem -LiteralPath $root -Directory) {
+              foreach ($version in (Get-ChildItem -LiteralPath $root -Directory)) {
                 foreach ($architecture in @('x64', 'x86')) {
                   $inf2catCandidates += Join-Path $version.FullName "$architecture/Inf2Cat.exe"
                 }
@@ -72,14 +106,106 @@ jobs:
           $inf2cat = $inf2catCandidates |
             Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
             Select-Object -First 1
-          if (-not $inf2cat) {
-            $inf2catCandidates | ForEach-Object { Write-Host "Checked $_" }
-            throw 'WDK Inf2Cat.exe was not found in restored packages or Windows Kits'
-          }
+          if (-not $inf2cat) { throw 'WDK Inf2Cat.exe was not found' }
+          Write-Host "Generating catalog with $inf2cat"
           & $inf2cat "/driver:$package" /os:10_25H2_X64 /verbose
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $package 'sysvad.cat'))) {
             throw 'Core package catalog generation failed'
           }
+
+      - name: Test-sign lab catalog
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $evidence = Join-Path $PWD 'lab-build-evidence'
+          $package = Join-Path $evidence 'core-package'
+          $catalogPath = Join-Path $package 'sysvad.cat'
+          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty Source
+          if (-not $signtool) {
+            $signtoolCandidates = @()
+            foreach ($root in @('C:/Program Files (x86)/Windows Kits/10/bin', 'C:/Program Files/Windows Kits/10/bin')) {
+              if (Test-Path -LiteralPath $root -PathType Container) {
+                foreach ($version in (Get-ChildItem -LiteralPath $root -Directory | Sort-Object Name -Descending)) {
+                  $signtoolCandidates += Join-Path $version.FullName 'x64/signtool.exe'
+                }
+              }
+            }
+            $signtool = $signtoolCandidates |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+              Select-Object -First 1
+          }
+          if (-not $signtool) { throw 'Windows SDK signtool.exe was not found' }
+          Write-Host "Using SignTool at $signtool"
+          $openSsl = Get-Command openssl.exe -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty Source
+          if (-not $openSsl) {
+            $openSslCandidates = @(
+              "$env:ProgramFiles/Git/usr/bin/openssl.exe"
+              'C:/Program Files (x86)/Git/usr/bin/openssl.exe'
+              "$env:ProgramFiles/OpenSSL-Win64/bin/openssl.exe"
+            )
+            $openSsl = $openSslCandidates |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+              Select-Object -First 1
+          }
+          if (-not $openSsl) { throw 'OpenSSL was not found on the Windows runner' }
+          Write-Host "Using OpenSSL at $openSsl"
+
+          $certificate = $null
+          $certificatePath = Join-Path $evidence 'SAR-Lab-TestSigning.cer'
+          $certificatePemPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pem'
+          $privateKeyPath = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.key'
+          $privateKeyPfx = Join-Path $env:RUNNER_TEMP 'SAR-Lab-TestSigning.pfx'
+          $privateKeyPassword = [Guid]::NewGuid().ToString('N')
+          $env:SAR_LAB_PFX_PASSWORD = $privateKeyPassword
+          try {
+            Write-Host 'Generating a seven-day RSA code-signing certificate with OpenSSL'
+            & $openSsl req -new -x509 -newkey rsa:2048 -sha256 -days 7 -nodes `
+              -keyout $privateKeyPath -out $certificatePemPath `
+              -subj "/CN=SAR Lab Ephemeral Test Signing $env:GITHUB_RUN_ID" `
+              -addext 'basicConstraints=critical,CA:FALSE' `
+              -addext 'keyUsage=critical,digitalSignature' `
+              -addext 'extendedKeyUsage=codeSigning'
+            if ($LASTEXITCODE -ne 0) { throw 'OpenSSL certificate generation failed' }
+            Write-Host 'Converting the public certificate to DER'
+            & $openSsl x509 -in $certificatePemPath -outform DER -out $certificatePath
+            if ($LASTEXITCODE -ne 0) { throw 'OpenSSL certificate export failed' }
+            Write-Host 'Exporting temporary PKCS#12 key without an interactive prompt'
+            & $openSsl pkcs12 -export -out $privateKeyPfx -inkey $privateKeyPath `
+              -in $certificatePemPath -passout env:SAR_LAB_PFX_PASSWORD
+            if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PKCS#12 export failed' }
+            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
+            if (-not $certificate.Thumbprint) { throw 'Generated public certificate has no thumbprint' }
+            Write-Host "Signing catalog with certificate $($certificate.Thumbprint)"
+            & $signtool sign /v /fd SHA256 /f $privateKeyPfx /p $privateKeyPassword $catalogPath
+            if ($LASTEXITCODE -ne 0) { throw 'Signing the lab catalog failed' }
+            Write-Host 'Catalog signed; Windows trust-policy verification is deferred to VM24'
+            Copy-Item -LiteralPath $catalogPath -Destination (Join-Path $evidence 'sysvad.cat') -Force
+            Set-Content -Path (Join-Path $evidence 'CERT-THUMBPRINT.txt') -Value $certificate.Thumbprint
+          }
+          finally {
+            if ($certificate) { $certificate.Dispose() }
+            foreach ($path in @($certificatePemPath, $privateKeyPath, $privateKeyPfx)) {
+              Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item Env:SAR_LAB_PFX_PASSWORD -ErrorAction SilentlyContinue
+          }
+
+      - name: Create lab artifact manifest
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $PWD 'lab-build-evidence'
+          $thumbprint = Get-Content -LiteralPath (Join-Path $evidence 'CERT-THUMBPRINT.txt') -Raw
+          @(
+            'VM24-only, test-signed SysVAD experiment package.'
+            'The signing private key was generated on the CI runner and was not included.'
+            'Install SAR-Lab-TestSigning.cer into LocalMachine Root and TrustedPublisher only on the disposable driver lab.'
+            "Certificate thumbprint: $($thumbprint.Trim())"
+            'Remove that certificate and the test driver after the experiment. This is not a SAR release package.'
+          ) | Set-Content -Path (Join-Path $evidence 'LAB-ONLY.txt')
           Get-ChildItem -Path $evidence -Recurse -File |
             ForEach-Object { "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, [IO.Path]::GetRelativePath($evidence, $_.FullName) } |
             Set-Content -Path (Join-Path $evidence 'SHA256SUMS.txt')

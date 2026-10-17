@@ -19,6 +19,9 @@ jobs:
       - name: Endpoint inventory parser tests
         shell: pwsh
         run: ./scripts/lab-endpoint-inventory.tests.ps1
+      - name: Fleet audio probe orchestration tests
+        shell: pwsh
+        run: ./scripts/lab-fleet-audio-probe.tests.ps1
       - name: Interactive probe argument tests
         shell: pwsh
         run: ./scripts/lab-interactive-probe.tests.ps1

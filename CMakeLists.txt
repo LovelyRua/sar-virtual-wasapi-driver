@@ -22,6 +22,39 @@ else()
 endif()
 add_test(NAME dual_bus_signal_test COMMAND dual_bus_signal_test)
 
+add_executable(signal_level_coverage_policy_test
+  tests/signal_level_coverage_policy_test.cpp)
+target_compile_features(signal_level_coverage_policy_test PRIVATE cxx_std_17)
+target_include_directories(signal_level_coverage_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(signal_level_coverage_policy_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(signal_level_coverage_policy_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME signal_level_coverage_policy_test COMMAND signal_level_coverage_policy_test)
+
+add_executable(signal_level_stability_gate_test
+  tests/signal_level_stability_gate_test.cpp)
+target_compile_features(signal_level_stability_gate_test PRIVATE cxx_std_17)
+target_include_directories(signal_level_stability_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(signal_level_stability_gate_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(signal_level_stability_gate_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME signal_level_stability_gate_test COMMAND signal_level_stability_gate_test)
+
+add_executable(signal_rms_window_analyzer_test
+  tests/signal_rms_window_analyzer_test.cpp)
+target_compile_features(signal_rms_window_analyzer_test PRIVATE cxx_std_17)
+target_include_directories(signal_rms_window_analyzer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(signal_rms_window_analyzer_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(signal_rms_window_analyzer_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME signal_rms_window_analyzer_test COMMAND signal_rms_window_analyzer_test)
+
 add_executable(signal_window_queue_test tests/signal_window_queue_test.cpp)
 target_compile_features(signal_window_queue_test PRIVATE cxx_std_17)
 target_include_directories(signal_window_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -31,6 +64,17 @@ else()
   target_compile_options(signal_window_queue_test PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME signal_window_queue_test COMMAND signal_window_queue_test)
+
+add_executable(capture_signal_window_assembler_test
+  tests/capture_signal_window_assembler_test.cpp)
+target_compile_features(capture_signal_window_assembler_test PRIVATE cxx_std_17)
+target_include_directories(capture_signal_window_assembler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(capture_signal_window_assembler_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(capture_signal_window_assembler_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME capture_signal_window_assembler_test COMMAND capture_signal_window_assembler_test)
 
 add_executable(wasapi_probe_options_test
   tests/wasapi_probe_options_test.cpp
@@ -55,6 +99,28 @@ else()
 endif()
 add_test(NAME wasapi_capture_timeline_test COMMAND wasapi_capture_timeline_test)
 
+add_executable(wasapi_capture_continuity_tracker_test
+  tests/wasapi_capture_continuity_tracker_test.cpp)
+target_compile_features(wasapi_capture_continuity_tracker_test PRIVATE cxx_std_17)
+target_include_directories(wasapi_capture_continuity_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(wasapi_capture_continuity_tracker_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(wasapi_capture_continuity_tracker_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME wasapi_capture_continuity_tracker_test COMMAND wasapi_capture_continuity_tracker_test)
+
+add_executable(wasapi_capture_continuity_gate_test
+  tests/wasapi_capture_continuity_gate_test.cpp)
+target_compile_features(wasapi_capture_continuity_gate_test PRIVATE cxx_std_17)
+target_include_directories(wasapi_capture_continuity_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(wasapi_capture_continuity_gate_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(wasapi_capture_continuity_gate_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME wasapi_capture_continuity_gate_test COMMAND wasapi_capture_continuity_gate_test)
+
 add_executable(wasapi_capture_service_metrics_test
   tests/wasapi_capture_service_metrics_test.cpp)
 target_compile_features(wasapi_capture_service_metrics_test PRIVATE cxx_std_17)
@@ -66,11 +132,45 @@ else()
 endif()
 add_test(NAME wasapi_capture_service_metrics_test COMMAND wasapi_capture_service_metrics_test)
 
+add_executable(saturating_counter_test tests/saturating_counter_test.cpp)
+target_compile_features(saturating_counter_test PRIVATE cxx_std_17)
+target_include_directories(saturating_counter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(saturating_counter_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(saturating_counter_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME saturating_counter_test COMMAND saturating_counter_test)
+
+add_executable(fleet_readiness_gate_test tests/fleet_readiness_gate_test.cpp)
+target_compile_features(fleet_readiness_gate_test PRIVATE cxx_std_17)
+target_include_directories(fleet_readiness_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(fleet_readiness_gate_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(fleet_readiness_gate_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME fleet_readiness_gate_test COMMAND fleet_readiness_gate_test)
+
+add_executable(instance_removal_gate_test
+  tests/instance_removal_gate_test.cpp)
+target_compile_features(instance_removal_gate_test PRIVATE cxx_std_17)
+target_include_directories(instance_removal_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+  target_compile_options(instance_removal_gate_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(instance_removal_gate_test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME instance_removal_gate_test COMMAND instance_removal_gate_test)
+
 if(WIN32)
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_sources(sar_device_instances PRIVATE
     src/wasapi_inventory.cpp
     src/endpoint_readiness.cpp
+    src/endpoint_removal.cpp
+    src/fleet_readiness.cpp
+    src/fleet_audio_probe_plan.cpp
   )
   target_compile_features(sar_device_instances PUBLIC cxx_std_17)
   target_include_directories(sar_device_instances PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -94,6 +194,15 @@ if(WIN32)
   set_tests_properties(device_instances_test PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+  add_executable(fleet_audio_probe_plan_test
+    tests/fleet_audio_probe_plan_test.cpp)
+  target_compile_features(fleet_audio_probe_plan_test PRIVATE cxx_std_17)
+  target_link_libraries(fleet_audio_probe_plan_test PRIVATE sar_device_instances)
+  if(MSVC)
+    target_compile_options(fleet_audio_probe_plan_test PRIVATE /W4 /WX)
+  endif()
+  add_test(NAME fleet_audio_probe_plan_test COMMAND fleet_audio_probe_plan_test)
+
   add_executable(wasapi_bridge_probe tests/wasapi_bridge_probe.cpp)
   target_compile_features(wasapi_bridge_probe PRIVATE cxx_std_17)
   target_include_directories(wasapi_bridge_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -106,7 +215,7 @@ if(WIN32)
   target_sources(wasapi_dual_bus_probe PRIVATE src/wasapi_probe_options.cpp)
   target_compile_features(wasapi_dual_bus_probe PRIVATE cxx_std_17)
   target_include_directories(wasapi_dual_bus_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-  target_link_libraries(wasapi_dual_bus_probe PRIVATE ole32 uuid)
+  target_link_libraries(wasapi_dual_bus_probe PRIVATE ole32 uuid avrt)
   if(MSVC)
     target_compile_options(wasapi_dual_bus_probe PRIVATE /W4 /WX)
   endif()
@@ -118,4 +227,13 @@ if(WIN32)
     target_compile_options(wasapi_event_pump_test PRIVATE /W4 /WX)
   endif()
   add_test(NAME wasapi_event_pump_test COMMAND wasapi_event_pump_test)
+
+  add_executable(mmcss_audio_thread_test tests/mmcss_audio_thread_test.cpp)
+  target_compile_features(mmcss_audio_thread_test PRIVATE cxx_std_17)
+  target_include_directories(mmcss_audio_thread_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(mmcss_audio_thread_test PRIVATE avrt)
+  if(MSVC)
+    target_compile_options(mmcss_audio_thread_test PRIVATE /W4 /WX)
+  endif()
+  add_test(NAME mmcss_audio_thread_test COMMAND mmcss_audio_thread_test)
 endif()

@@ -13,6 +13,21 @@ public:
         size_t queued_frames;
     };
 
+    struct ReadResult {
+        size_t valid_frames;
+        size_t missing_frames;
+        size_t queued_frames;
+    };
+
+    struct Stats {
+        size_t queued_frames;
+        size_t peak_queued_frames;
+        unsigned long long dropped_frames;
+        unsigned long long silent_frames;
+        unsigned long long underrun_reads;
+        size_t maximum_missing_frames;
+    };
+
     bool Initialize(unsigned char* storage, size_t capacity_frames, size_t bytes_per_frame) {
         if (storage == nullptr || capacity_frames == 0 || bytes_per_frame == 0 ||
             capacity_frames > static_cast<size_t>(-1) / bytes_per_frame ||
@@ -32,6 +47,8 @@ public:
         queued_frames_ = 0;
         dropped_frames_ = 0;
         silent_frames_ = 0;
+        underrun_reads_ = 0;
+        maximum_missing_frames_ = 0;
         peak_queued_frames_ = 0;
     }
 
@@ -59,13 +76,13 @@ public:
         return {frames, dropped, queued_frames_};
     }
 
-    // Returns valid frames. Any missing frames are explicitly zeroed.
-    size_t Read(unsigned char* destination, size_t frames) {
+    // Returns valid and missing frames. Missing samples are explicitly zeroed.
+    ReadResult ReadWithResult(unsigned char* destination, size_t frames) {
         if (storage_ == nullptr || (frames != 0 && destination == nullptr) ||
             frames > static_cast<size_t>(-1) / bytes_per_frame_) {
-            return 0;
+            return {0, 0, queued_frames_};
         }
-        if (frames == 0) return 0;
+        if (frames == 0) return {0, 0, queued_frames_};
 
         const size_t valid = frames < queued_frames_ ? frames : queued_frames_;
         CopyFromRing(destination, valid);
@@ -73,13 +90,32 @@ public:
         const size_t missing = frames - valid;
         ZeroBytes(destination + valid * bytes_per_frame_, missing * bytes_per_frame_);
         silent_frames_ += missing;
-        return valid;
+        if (missing != 0) {
+            ++underrun_reads_;
+            if (missing > maximum_missing_frames_) maximum_missing_frames_ = missing;
+        }
+        return {valid, missing, queued_frames_};
+    }
+
+    // Compatibility wrapper for callers that only need the valid-frame count.
+    size_t Read(unsigned char* destination, size_t frames) {
+        return ReadWithResult(destination, frames).valid_frames;
     }
 
     size_t queued_frames() const { return queued_frames_; }
     size_t peak_queued_frames() const { return peak_queued_frames_; }
     unsigned long long dropped_frames() const { return dropped_frames_; }
     unsigned long long silent_frames() const { return silent_frames_; }
+    unsigned long long underrun_reads() const { return underrun_reads_; }
+    size_t maximum_missing_frames() const { return maximum_missing_frames_; }
+
+    // The caller must serialize this with all reads and writes.
+    Stats TakeStats() {
+        const Stats stats{queued_frames_, peak_queued_frames_, dropped_frames_,
+                          silent_frames_, underrun_reads_, maximum_missing_frames_};
+        Reset();
+        return stats;
+    }
 
 private:
     static void CopyBytes(unsigned char* destination, const unsigned char* source, size_t bytes) {
@@ -122,6 +158,8 @@ private:
     size_t queued_frames_ = 0;
     unsigned long long dropped_frames_ = 0;
     unsigned long long silent_frames_ = 0;
+    unsigned long long underrun_reads_ = 0;
+    size_t maximum_missing_frames_ = 0;
     size_t peak_queued_frames_ = 0;
 };
 

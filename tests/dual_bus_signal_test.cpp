@@ -1,4 +1,7 @@
 #include "src/dual_bus_signal.h"
+#include "src/wasapi_capture_continuity_gate.h"
+#include "src/signal_level_monitor.h"
+#include "src/signal_rms_window_analyzer.h"
 
 #include <array>
 #include <cmath>
@@ -253,11 +256,219 @@ void TestSpectralAnalysisDoesNotProveTimelineContinuity() {
     const auto result = AnalyzeSignalWindow(captured.data(), kProbeRate, 0);
     Expect(result.passed(),
            "a spectral content pass must not be mistaken for a continuity pass");
+    sar_driver::CaptureTimelineStats timeline{};
+    timeline.position_gap_packets = 1;
+    timeline.position_gap_frames = droppedFrames;
+    const auto gapFailures = sar_driver::CaptureContinuityFailures(
+        timeline, kProbeRate, kProbeRate, kProbeRate);
+    Expect(!sar_driver::CaptureContinuityPassed(timeline, kProbeRate, kProbeRate,
+                                                kProbeRate) &&
+               sar_driver::HasCaptureContinuityFailure(
+                   gapFailures, sar_driver::CaptureContinuityFailure::position_gap),
+           "a measured device-position gap must fail strict continuity despite valid tones");
+    timeline = {};
+    timeline.silent_packets = 1;
+    const auto silentFailures = sar_driver::CaptureContinuityFailures(
+        timeline, kProbeRate, kProbeRate, kProbeRate);
+    Expect(!sar_driver::CaptureContinuityPassed(timeline, kProbeRate, kProbeRate,
+                                                kProbeRate) &&
+               sar_driver::HasCaptureContinuityFailure(
+                   silentFailures, sar_driver::CaptureContinuityFailure::silent_packet),
+           "a measured silent packet must fail strict continuity even if the full-window spectrum passes");
+    timeline = {};
+    timeline.qpc_regressions = 1;
+    const auto qpcFailures = sar_driver::CaptureContinuityFailures(
+        timeline, kProbeRate, kProbeRate, kProbeRate);
+    Expect(!sar_driver::CaptureContinuityPassed(timeline, kProbeRate, kProbeRate,
+                                                kProbeRate) &&
+               sar_driver::HasCaptureContinuityFailure(
+                   qpcFailures, sar_driver::CaptureContinuityFailure::qpc_regression),
+           "a QPC regression must fail strict continuity even if the full-window spectrum passes");
+}
+
+void TestLevelMonitorTracksCrossWindowSpread() {
+    sar_driver::SignalLevelMonitor monitor;
+    Expect(!monitor.WithinSpread(6.0), "empty level monitor cannot pass a limit");
+    monitor.Observe({0.04, 0.04});
+    monitor.Observe({0.02, 0.02});
+    Expect(monitor.stats().valid_windows == 2 &&
+               monitor.stats().invalid_windows == 0 &&
+               monitor.stats().observed_windows == 2,
+           "valid windows must contribute to the level summary");
+    Expect(monitor.stats().minimum_window[0] == 2 &&
+               monitor.stats().maximum_window[0] == 1,
+           "automatic window indices must identify the low and high level observations");
+    Expect(!monitor.WithinSpread(6.0, 3),
+           "a stable range must fail when fewer than the required windows were observed");
+    Expect(monitor.WithinSpread(3.1), "a 3 dB power spread must pass a 3.1 dB limit");
+    Expect(!monitor.WithinSpread(2.9), "level threshold must reject an undersized limit");
+    const double spread = monitor.stats().spread_db(0);
+    Expect(std::abs(spread - 10.0 * std::log10(2.0)) < 1e-9,
+           "level spread must be expressed as a power ratio in dB");
+    Expect(monitor.WithinSpread(spread),
+           "a threshold exactly equal to the measured spread must pass");
+    Expect(monitor.WithinSpread(spread, 2),
+           "the level gate must pass when its required valid-window count is met");
+    Expect(!monitor.WithinSpread(spread, 0),
+           "a zero-window coverage requirement must fail closed");
+    Expect(std::abs(monitor.stats().minimum_dbfs(1) - 10.0 * std::log10(0.02)) < 1e-9,
+           "minimum level must be reported relative to full scale");
+}
+
+void TestSingleChannelCaptureSagFailsLevelGate() {
+    const auto stableSamples = MakeWindow(0);
+    const auto stable = AnalyzeSignalWindow(stableSamples.data(), kProbeRate, 0);
+    auto saggedSamples = MakeWindow(0);
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        saggedSamples[frame * 2 + 1] *= 0.1f;
+    }
+    const auto sagged = AnalyzeSignalWindow(saggedSamples.data(), kProbeRate, 0);
+    Expect(stable.passed() && sagged.passed(),
+           "a low but present tone remains a valid content window");
+    Expect(sagged.expected_power[1] > 1e-5,
+           "the attenuated right channel remains above the content floor");
+
+    sar_driver::SignalLevelMonitor monitor;
+    monitor.Observe(stable.expected_power, 10);
+    monitor.Observe(sagged.expected_power, 22);
+    Expect(monitor.stats().valid_windows == 2 && monitor.stats().invalid_windows == 0,
+           "both stable and attenuated windows contribute to the level gate");
+    Expect(monitor.stats().spread_db(0) < 0.01,
+           "an isolated right-channel sag must not affect the left-channel range");
+    Expect(monitor.stats().minimum_window[0] == 10 &&
+               monitor.stats().minimum_window[1] == 22,
+           "minimum-level window must be tracked independently for each channel");
+    Expect(monitor.stats().spread_db(1) > 19.0 && !monitor.WithinSpread(1.0),
+           "a single-channel 20 dB capture sag must fail a 1 dB stability gate");
+}
+
+void TestSubsecondSagInsidePassingSpectralWindow() {
+    auto samples = MakeWindow(1);
+    constexpr unsigned sagStart = kProbeRate / 10;
+    constexpr unsigned sagEnd = sagStart * 2;
+    for (unsigned frame = sagStart; frame < sagEnd; ++frame) {
+        samples[frame * 2] *= 0.1f;
+    }
+    const auto fullSecond = AnalyzeSignalWindow(samples.data(), kProbeRate, 1);
+    Expect(fullSecond.passed(),
+           "a brief single-channel sag may still pass full-second tone classification");
+
+    sar_driver::SignalRmsWindowAnalyzer<kProbeRate / 10> shortWindows;
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        shortWindows.AppendFrame(samples[frame * 2], samples[frame * 2 + 1]);
+    }
+    const auto& stats = shortWindows.stats();
+    Expect(stats.valid_windows == 10 && stats.invalid_windows == 0,
+           "one second of capture must produce ten valid 100 ms RMS windows");
+    Expect(!shortWindows.WithinSpread(60.0, 11),
+           "a 100 ms analyzer must enforce the requested minimum window count");
+    Expect(stats.minimum_window[0] == 2,
+           "subsecond RMS windows must localize the attenuated left interval");
+    Expect(stats.spread_db(0) > 3.0 && stats.spread_db(1) < 0.1,
+           "100 ms RMS range must expose a short left-channel sag without implicating right");
+    Expect(!shortWindows.WithinSpread(1.0),
+           "strict level stability must fail when an otherwise valid short window sags");
+}
+
+void TestPhaseStepDoesNotMasqueradeAsLevelSag() {
+    auto stable = MakeWindow(1);
+    auto phaseStepped = stable;
+    constexpr unsigned phaseStepFrame = kProbeRate / 2;
+    constexpr double phaseStep = 1.2;
+    constexpr unsigned frequency = sar_driver::kProbeFrequencies[1][0];
+    for (unsigned frame = phaseStepFrame; frame < kProbeRate; ++frame) {
+        const double phase = 2.0 * sar_driver::kProbePi * frequency * frame /
+                                 kProbeRate +
+                             phaseStep;
+        phaseStepped[frame * 2] = static_cast<float>(std::sin(phase) * 0.28);
+    }
+
+    const auto stableSignal = AnalyzeSignalWindow(stable.data(), kProbeRate, 1);
+    const auto steppedSignal = AnalyzeSignalWindow(phaseStepped.data(), kProbeRate, 1);
+    Expect(stableSignal.passed() && steppedSignal.passed(),
+           "a phase step must preserve valid bus content and channel isolation");
+
+    sar_driver::SignalLevelMonitor toneLevels;
+    toneLevels.Observe(stableSignal.expected_power, 1);
+    toneLevels.Observe(steppedSignal.expected_power, 2);
+    Expect(toneLevels.stats().spread_db(0) > 1.0 && !toneLevels.WithinSpread(1.0),
+           "single-bin tone power must retain phase-sensitive diagnostic evidence");
+
+    sar_driver::SignalRmsWindowAnalyzer<kProbeRate / 10> shortLevels;
+    for (unsigned frame = 0; frame < kProbeRate; ++frame) {
+        shortLevels.AppendFrame(phaseStepped[frame * 2], phaseStepped[frame * 2 + 1]);
+    }
+    Expect(shortLevels.stats().valid_windows == 10 &&
+               shortLevels.stats().spread_db(0) < 0.1 &&
+               shortLevels.stats().spread_db(1) < 0.1 &&
+               shortLevels.WithinSpread(1.0),
+           "constant-amplitude phase steps must pass the short-window RMS level gate");
+}
+
+void TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie() {
+    sar_driver::SignalLevelMonitor monitor;
+    monitor.Observe({0.04, 0.03}, 4);
+    monitor.Observe({0.02, 0.03}, 8);
+    monitor.Observe({0.02, 0.01}, 9);
+    monitor.Observe({0.0, 0.04}, 10);
+    const auto& stats = monitor.stats();
+    Expect(stats.observed_windows == 4 && stats.valid_windows == 3 &&
+               stats.invalid_windows == 1,
+           "observed, valid, and invalid level-window counts must remain distinct");
+    Expect(stats.minimum_window[0] == 8 && stats.maximum_window[0] == 4,
+           "equal minimum values must retain the first window index");
+    Expect(stats.minimum_window[1] == 9 && stats.maximum_window[1] == 4,
+           "invalid windows must not replace valid per-channel extrema");
+    Expect(std::isinf(sar_driver::SignalLevelStats::power_dbfs(0.0)) &&
+               std::isinf(sar_driver::SignalLevelStats::power_dbfs(
+                   std::numeric_limits<double>::quiet_NaN())),
+           "zero or non-finite window power must map to negative infinity dBFS");
+}
+
+void TestInvalidLevelWindowDoesNotPoisonValidRange() {
+    sar_driver::SignalLevelMonitor monitor;
+    monitor.Observe({0.04, 0.04});
+    monitor.Observe({0.0, 0.03});
+    monitor.Observe({std::numeric_limits<double>::infinity(), 0.04});
+    monitor.Observe({0.02, 0.02});
+    Expect(monitor.stats().valid_windows == 2 &&
+               monitor.stats().invalid_windows == 2,
+           "invalid windows must be counted without changing valid extrema");
+    Expect(!monitor.WithinSpread(4.0), "an invalid window must fail the optional level gate");
+    Expect(std::abs(monitor.stats().spread_db(0) - 10.0 * std::log10(2.0)) < 1e-9,
+           "invalid windows must not widen the valid level range");
+    Expect(std::isinf(monitor.stats().spread_db(2)),
+           "out-of-range channel queries must fail closed");
+    Expect(!monitor.WithinSpread(std::numeric_limits<double>::quiet_NaN()),
+           "non-finite level limits must fail closed");
+    Expect(!monitor.WithinSpread(0.0) && !monitor.WithinSpread(-1.0) &&
+               !monitor.WithinSpread(std::numeric_limits<double>::infinity()),
+           "zero, negative, and infinite spread limits must fail closed");
 }
 
 } // namespace
 
 int main() {
+    Expect(sar_driver::kProbeBuses == 8 &&
+               sar_driver::kProbeFrequencies.size() == 8,
+           "fleet probe must expose eight uniquely measured buses");
+    for (std::size_t bus = 0; bus < sar_driver::kProbeFrequencies.size(); ++bus) {
+        for (std::size_t channel = 0; channel < 2; ++channel) {
+            const unsigned frequency = sar_driver::kProbeFrequencies[bus][channel];
+            Expect(frequency > 0 && frequency < kProbeRate / 2,
+                   "every bus tone must be below Nyquist");
+            for (std::size_t other_bus = 0;
+                 other_bus <= bus; ++other_bus) {
+                const std::size_t channel_limit = other_bus == bus ? channel : 2;
+                for (std::size_t other_channel = 0;
+                     other_channel < channel_limit; ++other_channel) {
+                    Expect(frequency !=
+                               sar_driver::kProbeFrequencies[other_bus][other_channel],
+                           "each bus and channel must use a unique spectral bin");
+                }
+            }
+        }
+    }
     TestPairedBuses();
     TestDcOffsetPreservesToneClassification();
     TestProbeToneIsIndependentOfPacketBoundaries();
@@ -268,10 +479,16 @@ int main() {
     TestSampleIntegrity();
     TestSignalThresholdBoundaries();
     TestSpectralAnalysisDoesNotProveTimelineContinuity();
+    TestLevelMonitorTracksCrossWindowSpread();
+    TestSingleChannelCaptureSagFailsLevelGate();
+    TestLevelWindowIndicesIgnoreInvalidWindowsAndKeepFirstTie();
+    TestInvalidLevelWindowDoesNotPoisonValidRange();
+    TestSubsecondSagInsidePassingSpectralWindow();
+    TestPhaseStepDoesNotMasqueradeAsLevelSag();
     if (failures != 0) {
         std::fprintf(stderr, "%d signal-analysis checks failed\n", failures);
         return 1;
     }
-    std::puts("dual bus signal analysis passed");
+    std::puts("eight bus signal analysis passed");
     return 0;
 }

@@ -1,4 +1,5 @@
 #include "src/wasapi_capture_service_metrics.h"
+#include "src/wasapi_capture_continuity_gate.h"
 
 #include <cstdint>
 #include <limits>
@@ -44,5 +45,105 @@ int main() {
         metrics.stats().packets_over_late_threshold != 1 ||
         metrics.stats().packets_with_valid_timestamp != 5 ||
         metrics.stats().packets_with_future_timestamp != 1) return 3;
+
+    // A later empty service pass must not erase prior latency or packet counts.
+    metrics.BeginPass();
+    metrics.ObservePacket(10000, 13000, 1000);
+    metrics.ObservePacket(13000, 16000, 1000);
+    metrics.ObservePacket(16000, 17000, 1000);
+    metrics.EndPass();
+    metrics.BeginPass();
+    metrics.EndPass();
+    if (metrics.stats().service_passes != 7 ||
+        metrics.stats().empty_service_passes != 2 ||
+        metrics.stats().maximum_packets_per_pass != 3 ||
+        metrics.stats().packets != 9 ||
+        metrics.stats().packets_over_late_threshold != 3 ||
+        metrics.stats().maximum_timestamp_age_100ns !=
+            std::numeric_limits<std::uint64_t>::max() ||
+        metrics.stats().total_timestamp_age_100ns !=
+            std::numeric_limits<std::uint64_t>::max()) return 5;
+
+    // Late servicing is important diagnostic evidence, but it is not itself
+    // a device-position gap. Keep that distinction in the strict gate.
+    sar_driver::CaptureTimelineStats contiguous{};
+    if (!sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
+        return 6;
+    }
+    sar_driver::WasapiCaptureServiceMetrics late;
+    late.BeginPass();
+    late.ObservePacket(1000, 5000, 1000);
+    late.EndPass();
+    if (late.stats().packets_over_late_threshold != 1 ||
+        sar_driver::CaptureContinuityFailures(contiguous, 48000, 48000, 48000) !=
+            sar_driver::CaptureContinuityFailure::none) return 9;
+    sar_driver::WasapiCaptureServiceMetrics timely;
+    timely.BeginPass();
+    timely.ObservePacket(1000, 1100, 1000);
+    timely.EndPass();
+    sar_driver::CaptureTimelineStats silentCapture{};
+    silentCapture.silent_packets = 1;
+    if (timely.stats().packets_over_late_threshold != 0 ||
+        timely.stats().packets_with_future_timestamp != 0 ||
+        sar_driver::CaptureContinuityPassed(silentCapture, 48000, 48000, 48000)) {
+        return 7;
+    }
+    if (!sar_driver::HasCaptureContinuityFailure(
+            sar_driver::CaptureContinuityFailures(silentCapture, 48000, 48000, 48000),
+            sar_driver::CaptureContinuityFailure::silent_packet)) return 10;
+    sar_driver::CaptureTimelineStats regressedCapture{};
+    regressedCapture.qpc_regressions = 1;
+    if (timely.stats().packets_over_late_threshold != 0 ||
+        sar_driver::CaptureContinuityPassed(regressedCapture, 48000, 48000, 48000)) {
+        return 8;
+    }
+    if (!sar_driver::HasCaptureContinuityFailure(
+            sar_driver::CaptureContinuityFailures(regressedCapture, 48000, 48000, 48000),
+            sar_driver::CaptureContinuityFailure::qpc_regression)) return 11;
+
+    sar_driver::WasapiCaptureServiceMetrics delayed;
+    delayed.BeginPass();
+    delayed.ObservePacket(1000, 2501, 1000);
+    delayed.ObservePacket(1500, 2501, 1000);
+    delayed.EndPass();
+    if (delayed.stats().packets_over_late_threshold != 2 ||
+        delayed.stats().maximum_packets_per_pass != 2 ||
+        delayed.stats().maximum_timestamp_age_100ns != 1501 ||
+        !sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
+        return 12;
+    }
+
+    sar_driver::WasapiCaptureServiceMetrics sustainedLate;
+    for (std::uint64_t packet = 0; packet < 600; ++packet) {
+        const auto captureQpc = packet * 100000;
+        sustainedLate.BeginPass();
+        sustainedLate.ObservePacket(captureQpc, captureQpc + 2501, 1000);
+        sustainedLate.EndPass();
+    }
+    if (sustainedLate.stats().packets != 600 ||
+        sustainedLate.stats().service_passes != 600 ||
+        sustainedLate.stats().packets_with_valid_timestamp != 600 ||
+        sustainedLate.stats().packets_with_future_timestamp != 0 ||
+        sustainedLate.stats().packets_over_late_threshold != 600 ||
+        sustainedLate.stats().maximum_timestamp_age_100ns != 2501 ||
+        sustainedLate.stats().total_timestamp_age_100ns != 600 * 2501 ||
+        sustainedLate.stats().empty_service_passes != 0 ||
+        sustainedLate.stats().maximum_packets_per_pass != 1 ||
+        !sar_driver::CaptureContinuityPassed(contiguous, 48000, 48000, 48000)) {
+        return 14;
+    }
+
+    sar_driver::WasapiCaptureServiceMetrics unknownPeriod;
+    unknownPeriod.BeginPass();
+    unknownPeriod.ObservePacket(100, 1000100, 0);
+    unknownPeriod.ObservePacket(1000200, 1000100, 0);
+    unknownPeriod.EndPass();
+    if (unknownPeriod.stats().packets != 2 ||
+        unknownPeriod.stats().packets_with_valid_timestamp != 1 ||
+        unknownPeriod.stats().packets_with_future_timestamp != 1 ||
+        unknownPeriod.stats().total_timestamp_age_100ns != 1000000 ||
+        unknownPeriod.stats().maximum_timestamp_age_100ns != 1000000 ||
+        unknownPeriod.stats().packets_over_late_threshold != 0 ||
+        unknownPeriod.stats().maximum_packets_per_pass != 2) return 13;
     return 0;
 }

@@ -54,6 +54,10 @@ struct InstanceReadiness {
 
 HRESULT inspect_instance_readiness(const std::wstring& instance_id,
                                    InstanceReadiness& readiness);
+HRESULT inspect_instance_readiness(
+    const Instance& instance,
+    const std::vector<WasapiEndpoint>& endpoint_snapshot,
+    InstanceReadiness& readiness);
 HRESULT wait_for_instance_readiness(const std::wstring& instance_id,
                                     unsigned timeout_ms,
                                     InstanceReadiness& readiness);

@@ -37,7 +37,7 @@ std::wstring lower(std::wstring value) {
 }
 
 bool same_id(const std::wstring& lhs, const std::wstring& rhs) {
-    return lower(lhs) == lower(rhs);
+    return same_instance_id(lhs, rhs);
 }
 
 bool acceptable_label(const std::wstring& label) {
@@ -231,6 +231,15 @@ Result Result::failure(DWORD error, const wchar_t* operation) {
     return {false, error, operation};
 }
 
+bool same_instance_id(const std::wstring& lhs,
+                      const std::wstring& rhs) noexcept {
+    return lhs.size() == rhs.size() &&
+           std::equal(lhs.begin(), lhs.end(), rhs.begin(),
+                      [](wchar_t left, wchar_t right) {
+                          return std::towupper(left) == std::towupper(right);
+                      });
+}
+
 Result list(std::vector<Instance>& instances) {
     instances.clear();
     DeviceSet set = open_media_set(DIGCF_PRESENT);
@@ -259,9 +268,9 @@ Result add(const std::wstring& inf_path, const std::wstring& label, Instance& cr
     std::vector<Instance> current;
     result = list(current);
     if (!result.ok) return result;
-    if (current.size() >= kMaximumInstances) {
+    if (!can_add_instance(current.size())) {
         return Result::failure(ERROR_TOO_MANY_NAMES,
-                               L"Driver currently supports one SAR instance; remove it first");
+                               L"Experimental adapter limit reached; remove one first");
     }
     for (const Instance& item : current) {
         if (same_id(item.label, label)) {

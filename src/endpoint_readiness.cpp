@@ -2,6 +2,8 @@
 
 #include "endpoint_readiness.h"
 
+#include "fleet_readiness_gate.h"
+
 #include <algorithm>
 #include <cwctype>
 #include <thread>
@@ -92,8 +94,6 @@ HRESULT inspect_instance_readiness(const std::wstring& instance_id,
         readiness.inventory_error = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
         return readiness.inventory_error;
     }
-    readiness.instance = *found;
-
     std::vector<WasapiEndpoint> endpoints;
     const HRESULT inventory_result = enumerate_wasapi_endpoints(endpoints);
     if (FAILED(inventory_result)) {
@@ -101,14 +101,24 @@ HRESULT inspect_instance_readiness(const std::wstring& instance_id,
         return inventory_result;
     }
 
-    for (auto& endpoint : endpoints) {
+    return inspect_instance_readiness(*found, endpoints, readiness);
+}
+
+HRESULT inspect_instance_readiness(
+    const Instance& instance,
+    const std::vector<WasapiEndpoint>& endpoint_snapshot,
+    InstanceReadiness& readiness) {
+    readiness = {};
+    readiness.instance = instance;
+
+    for (const auto& endpoint : endpoint_snapshot) {
         if (endpoint.state == DEVICE_STATE_ACTIVE &&
             FAILED(endpoint.parent_lookup_error)) {
             ++readiness.active_unassociated_endpoint_count;
         }
-        if (same_id(endpoint.parent_device_id, instance_id)) {
+        if (endpoint_parent_matches(endpoint, instance.id)) {
             count_endpoint(endpoint, readiness.counts);
-            readiness.endpoints.push_back(std::move(endpoint));
+            readiness.endpoints.push_back(endpoint);
         }
     }
     readiness.state = classify(readiness);
@@ -149,7 +159,12 @@ HRESULT wait_for_instance_readiness(const std::wstring& instance_id,
             readiness = std::move(snapshot);
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(kReadinessPollIntervalMs));
+        const auto delay = bounded_readiness_poll_delay(
+            deadline, std::chrono::steady_clock::now(),
+            std::chrono::milliseconds(kReadinessPollIntervalMs));
+        if (delay > std::chrono::steady_clock::duration::zero()) {
+            std::this_thread::sleep_for(delay);
+        }
     } while (std::chrono::steady_clock::now() < deadline);
 
     readiness.stable_samples = consecutive_ready;
@@ -194,7 +209,7 @@ const wchar_t* readiness_hint(ReadinessState state) {
     case ReadinessState::stability_not_confirmed:
         return L"The topology appeared ready but did not remain ready for three consecutive inventory samples.";
     case ReadinessState::ready:
-        return L"All four endpoints are active, parented to this adapter, and expose mix formats across three samples.";
+        return L"All four endpoints are active, parented to this adapter, and expose mix formats in this snapshot.";
     default:
         return L"Readiness state is unknown.";
     }
