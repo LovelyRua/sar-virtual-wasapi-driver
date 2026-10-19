@@ -8,6 +8,8 @@
 #include "src/wasapi_inventory.h"
 
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -620,6 +622,10 @@ int remove_and_wait(const std::wstring& id, unsigned timeout_ms, bool as_json) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    // Redirected JSON must preserve non-ASCII adapter labels independently of
+    // the caller's console code page. All output in this executable is wide.
+    if (_setmode(_fileno(stdout), _O_U8TEXT) == -1 ||
+        _setmode(_fileno(stderr), _O_U8TEXT) == -1) return 1;
     if (argc == 2 && std::wcscmp(argv[1], L"help") == 0) {
         usage();
         return 0;
