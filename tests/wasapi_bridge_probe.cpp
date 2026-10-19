@@ -10,6 +10,8 @@
 
 #include "src/wasapi_event_pump.h"
 #include "src/stereo_route_signal_gate.h"
+#include "src/mmcss_audio_thread.h"
+#include "src/wasapi_capture_continuity_tracker.h"
 
 #include <algorithm>
 #include <chrono>
@@ -215,14 +217,38 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     UINT32 renderCapacity = 0;
     Check(render->GetBufferSize(&renderCapacity), "Get render buffer size");
 
-    Check(capture->Start(), "Start capture");
-    Check(render->Start(), "Start render");
     std::vector<int16_t> received;
+    constexpr size_t maximumCaptureFrames = kSampleRate * 5;
+    received.reserve(maximumCaptureFrames * 2);
     UINT64 sentFrames = 0;
     UINT64 silentFrames = 0;
     UINT64 capturePackets = 0;
     UINT64 discontinuityPackets = 0;
     UINT32 maximumPacketFrames = 0;
+    UINT64 renderEmptyEvents = 0;
+    UINT64 waitTimeouts = 0;
+    sar_driver::WasapiCaptureContinuityTracker continuity(kSampleRate, kSampleRate / 2);
+    const auto fillRender = [&](UINT32 frames, bool tone) {
+        BYTE* bytes = nullptr;
+        Check(writer->GetBuffer(frames, &bytes), "Get render buffer");
+        if (tone) {
+            auto* output = reinterpret_cast<int16_t*>(bytes);
+            for (UINT32 frame = 0; frame < frames; ++frame) {
+                const double t = static_cast<double>(sentFrames + frame) / kSampleRate;
+                output[frame * 2] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 997 * t));
+                output[frame * 2 + 1] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 1501 * t));
+            }
+        }
+        Check(writer->ReleaseBuffer(frames, tone ? 0 : AUDCLNT_BUFFERFLAGS_SILENT),
+              "Release render buffer");
+        if (tone) sentFrames += frames;
+    };
+    if (renderCapacity == 0) throw std::runtime_error("Empty render buffer");
+    fillRender(renderCapacity, true);
+    const sar_driver::ScopedMmcssAudioThread audioThread;
+    if (!audioThread.registered()) throw std::runtime_error("MMCSS registration failed");
+    Check(capture->Start(), "Start capture");
+    Check(render->Start(), "Start render");
     const auto begin = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - begin < std::chrono::seconds(4)) {
         const DWORD wait = eventPump.Wait(50, readyEvents);
@@ -231,34 +257,45 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
             throw std::runtime_error("Wait for audio events failed: " +
                                      std::to_string(error));
         }
+        if (wait == WAIT_TIMEOUT) ++waitTimeouts;
         for (const size_t eventIndex : readyEvents) {
-            if (eventIndex == 0 &&
-                std::chrono::steady_clock::now() - begin < std::chrono::seconds(3)) {
+            if (eventIndex == 0) {
                 UINT32 padding = 0;
                 Check(render->GetCurrentPadding(&padding), "Get render padding");
+                if (padding > renderCapacity) throw std::runtime_error("Invalid render padding");
+                if (padding == 0) ++renderEmptyEvents;
                 const UINT32 available = renderCapacity - padding;
                 if (available != 0) {
-                    BYTE* bytes = nullptr;
-                    Check(writer->GetBuffer(available, &bytes), "Get render buffer");
-                    auto* output = reinterpret_cast<int16_t*>(bytes);
-                    for (UINT32 frame = 0; frame < available; ++frame) {
-                        const double t = static_cast<double>(sentFrames + frame) / kSampleRate;
-                        output[frame * 2] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 997 * t));
-                        output[frame * 2 + 1] = static_cast<int16_t>(10000 * std::sin(2 * kPi * 1501 * t));
-                    }
-                    Check(writer->ReleaseBuffer(available, 0), "Release render buffer");
-                    sentFrames += available;
+                    fillRender(available,
+                        std::chrono::steady_clock::now() - begin < std::chrono::seconds(3));
                 }
             }
 
             if (eventIndex == 1) {
                 UINT32 packetFrames = 0;
                 Check(reader->GetNextPacketSize(&packetFrames), "Get capture packet size");
-                while (packetFrames != 0) {
+                unsigned drainedPackets = 0;
+                const auto drainBegin = std::chrono::steady_clock::now();
+                while (packetFrames != 0 && drainedPackets++ < 32 &&
+                       std::chrono::steady_clock::now() - drainBegin < std::chrono::milliseconds(1) &&
+                       std::chrono::steady_clock::now() - begin < std::chrono::seconds(4)) {
                     BYTE* bytes = nullptr;
                     DWORD flags = 0;
                     UINT32 frames = 0;
-                    Check(reader->GetBuffer(&bytes, &frames, &flags, nullptr, nullptr), "Get capture buffer");
+                    UINT64 position = 0;
+                    UINT64 qpc = 0;
+                    Check(reader->GetBuffer(&bytes, &frames, &flags, &position, &qpc), "Get capture buffer");
+                    if (frames > maximumCaptureFrames - received.size() / 2 ||
+                        (frames != 0 && bytes == nullptr && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))) {
+                        Check(reader->ReleaseBuffer(frames), "Release invalid capture buffer");
+                        throw std::runtime_error("Capture exceeds bounded storage or has invalid data");
+                    }
+                    if (std::chrono::steady_clock::now() - begin < std::chrono::milliseconds(2500)) {
+                        continuity.Observe(position, qpc, frames,
+                            (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0,
+                            (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0,
+                            (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) != 0);
+                    }
                     ++capturePackets;
                     maximumPacketFrames = std::max(maximumPacketFrames, frames);
                     if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) {
@@ -297,6 +334,17 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     }
     Check(render->Stop(), "Stop render");
     Check(capture->Stop(), "Stop capture");
+
+    const auto& timeline = continuity.stats();
+    std::cout << "mmcss_registered=" << static_cast<int>(audioThread.registered())
+              << " render_empty_events=" << renderEmptyEvents
+              << " wait_timeouts=" << waitTimeouts
+              << " measured_capture_frames=" << continuity.measured_frames()
+              << " steady_discontinuity_packets=" << timeline.discontinuity_packets
+              << " steady_timestamp_error_packets=" << timeline.timestamp_error_packets
+              << " steady_position_gap_frames=" << timeline.position_gap_frames
+              << " steady_position_overlap_frames=" << timeline.position_overlap_frames
+              << " steady_qpc_regressions=" << timeline.qpc_regressions << '\n';
 
     const size_t capturedFrames = received.size() / 2;
     if (routeCapture) {
