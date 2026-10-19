@@ -276,6 +276,28 @@ bool elevated() {
     return ok && elevation.TokenIsElevated != 0;
 }
 
+class MutationGuard {
+public:
+    explicit MutationGuard(bool enabled) {
+        if (!enabled) return;
+        handle_ = CreateMutexW(nullptr, FALSE,
+            L"Global\\SAR.VirtualWASAPI.InstanceManagement.v1");
+        if (!handle_) return;
+        const DWORD result = WaitForSingleObject(handle_, 0);
+        acquired_ = result == WAIT_OBJECT_0 || result == WAIT_ABANDONED;
+    }
+    ~MutationGuard() {
+        if (acquired_) ReleaseMutex(handle_);
+        if (handle_) CloseHandle(handle_);
+    }
+    MutationGuard(const MutationGuard&) = delete;
+    MutationGuard& operator=(const MutationGuard&) = delete;
+    bool acquired() const { return acquired_; }
+private:
+    HANDLE handle_ = nullptr;
+    bool acquired_ = false;
+};
+
 void print_instance(const sar::devices::Instance& instance) {
     std::wcout << instance.id << L'\n'
                << L"  label: " << instance.label << L'\n'
@@ -690,6 +712,22 @@ int wmain(int argc, wchar_t** argv) {
         return probe_plan(timeout_ms, as_json);
     }
 
+    const bool mutation = argc >= 2 &&
+        (std::wcscmp(argv[1], L"add") == 0 ||
+         std::wcscmp(argv[1], L"rename") == 0 ||
+         std::wcscmp(argv[1], L"remove") == 0);
+    if (mutation && !elevated()) {
+        std::wcerr << L"error: an elevated prompt is required for edits\n";
+        return 1;
+    }
+    // Serialize all elevated clients, including two GUI processes and manual
+    // CLI invocations. Never queue a stale destructive request behind another.
+    const MutationGuard mutation_guard(mutation);
+    if (mutation && !mutation_guard.acquired()) {
+        std::wcerr << L"error: another instance manager is editing devices, "
+                   << L"or the management lock could not be opened\n";
+        return 5;
+    }
     if (argc == 4 && std::wcscmp(argv[1], L"add") == 0) {
         if (!elevated()) {
             std::wcerr << L"error: an elevated prompt is required for add\n";
