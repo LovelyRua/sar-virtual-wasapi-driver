@@ -299,6 +299,11 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     Check(capture->Stop(), "Stop capture");
 
     const size_t capturedFrames = received.size() / 2;
+    if (routeCapture) {
+        const auto nonzeroSamples = std::count_if(received.begin(), received.end(),
+            [](int16_t sample) { return sample != 0; });
+        std::cout << "nonzero_samples=" << nonzeroSamples << '\n';
+    }
     std::cout << "sent_frames=" << sentFrames << " captured_frames=" << capturedFrames
               << " silent_frames=" << silentFrames
               << " capture_packets=" << capturePackets
