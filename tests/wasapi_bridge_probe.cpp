@@ -9,6 +9,7 @@
 #include <wrl/client.h>
 
 #include "src/wasapi_event_pump.h"
+#include "src/stereo_route_signal_gate.h"
 
 #include <algorithm>
 #include <chrono>
@@ -307,9 +308,9 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
 
     double strongest = 0.0;
     double leakage = 0.0;
+    double firstChannelPower = 0.0;
     double secondChannelPower = 0.0;
-    const bool checkStereoChannels = stereoCapture ||
-                                     (routeCapture && captureMixFormatChannels == 2);
+    const bool checkStereoChannels = stereoCapture || routeCapture;
     for (size_t start = 0; start + kSampleRate <= capturedFrames; start += kSampleRate / 2) {
         const double first = TonePower(received, start, kSampleRate, 0, 997);
         const double second = TonePower(received, start, kSampleRate,
@@ -317,8 +318,8 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
         if (first + second > strongest) {
             strongest = first + second;
             if (routeCapture) {
-                secondChannelPower = TonePower(received, start, kSampleRate, 1, 997)
-                                   + TonePower(received, start, kSampleRate, 1, 1501);
+                firstChannelPower = first;
+                secondChannelPower = second;
             }
             leakage = defaultCapture && !checkStereoChannels
                 ? TonePower(received, start, kSampleRate, 0, 2000)
@@ -329,9 +330,13 @@ int Run(IMMDeviceEnumerator* enumerator, const wchar_t* renderId, const wchar_t*
     std::cout << "target_power=" << strongest
               << (defaultCapture && !checkStereoChannels ? " fixed_tone_power=" : " cross_channel_power=")
               << leakage << '\n';
-    if (routeCapture) std::cout << "second_channel_power=" << secondChannelPower << '\n';
+    if (routeCapture) {
+        std::cout << "first_channel_power=" << firstChannelPower
+                  << " second_channel_power=" << secondChannelPower << '\n';
+        return static_cast<int>(sar_driver::StereoRouteSignalExitCode(
+            firstChannelPower, secondChannelPower, leakage));
+    }
     if (strongest < 1e12 || strongest < leakage * 100.0) return 3;
-    if (routeCapture && secondChannelPower < 1e12) return 4;
     return 0;
 }
 
