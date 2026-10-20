@@ -452,6 +452,8 @@ typedef struct _SAR_BRIDGE_STATS
     ULONG PeakQueuedFrames;
     ULONGLONG DroppedFrames;
     ULONGLONG SilentFrames;
+    ULONGLONG UnderrunReads;
+    ULONG MaximumMissingFrames;
     ULONGLONG InvalidWriteBytes;
     ULONGLONG InvalidReadBytes;
     ULONGLONG WriteCalls;
@@ -497,9 +499,7 @@ DECLARE_INTERFACE_(IAdapterCommon, IUnknown)
         _In_ ULONG Bytes
     ) PURE;
 
-    STDMETHOD_(VOID, BridgeReset)(THIS_ _In_ ULONG Bus) PURE;
-
-    STDMETHOD_(VOID, BridgeGetStats)
+    STDMETHOD_(VOID, BridgeTakeStats)
     (
         THIS_
         _In_ ULONG Bus,

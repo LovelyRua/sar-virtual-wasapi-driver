@@ -1,4 +1,5 @@
 #include "src/signal_window_queue.h"
+#include "src/capture_signal_window_assembler.h"
 
 #include <array>
 #include <atomic>
@@ -10,6 +11,7 @@
 namespace {
 
 using Queue = sar_driver::SignalWindowQueue<4, 2, 3>;
+using Assembler = sar_driver::CaptureSignalWindowAssembler<Queue>;
 constexpr std::size_t kSamples = Queue::kSamplesPerWindow;
 
 bool test_rejects_invalid_windows() {
@@ -19,6 +21,49 @@ bool test_rejects_invalid_windows() {
     if (queue.try_push(samples.data(), samples.size() - 1)) return false;
     if (queue.invalid_pushes() != 2 || queue.dropped_windows() != 0) return false;
     return queue.queued_windows() == 0;
+}
+
+bool test_segment_restart_never_splices_audio_windows() {
+    Queue queue;
+    Assembler assembler;
+    if (assembler.AppendFrame(1.0f, -1.0f, queue) ||
+        assembler.AppendFrame(2.0f, -2.0f, queue)) return false;
+    if (!assembler.DiscardPartialSegment() || assembler.pending_frames() != 0 ||
+        assembler.discarded_segment_frames() != 2) return false;
+    if (assembler.DiscardPartialSegment()) return false;
+    for (int frame = 0; frame < 4; ++frame) {
+        if (assembler.AppendFrame(static_cast<float>(10 + frame),
+                                  static_cast<float>(-10 - frame), queue) != (frame == 3)) {
+            return false;
+        }
+    }
+    bool intact = false;
+    const bool consumed = queue.try_consume_one([&](const float* samples, std::size_t count) {
+        intact = count == 8 && samples[0] == 10.0f && samples[1] == -10.0f &&
+                 samples[6] == 13.0f && samples[7] == -13.0f;
+    });
+    return consumed && intact && assembler.completed_windows() == 1 &&
+           assembler.rejected_windows() == 0 && assembler.pending_frames() == 0;
+}
+
+bool test_queue_rejection_does_not_poison_the_next_complete_window() {
+    Queue queue;
+    Assembler assembler;
+    std::array<float, kSamples> full{};
+    if (!queue.try_push(full.data(), full.size()) ||
+        !queue.try_push(full.data(), full.size()) ||
+        !queue.try_push(full.data(), full.size())) return false;
+    for (int frame = 0; frame < 4; ++frame) {
+        if (assembler.AppendFrame(1.0f, 1.0f, queue)) return false;
+    }
+    if (assembler.completed_windows() != 1 || assembler.rejected_windows() != 1 ||
+        assembler.pending_frames() != 0) return false;
+    while (queue.try_consume_one([](const float*, std::size_t) {})) {}
+    for (int frame = 0; frame < 4; ++frame) {
+        if (assembler.AppendFrame(2.0f, 2.0f, queue) != (frame == 3)) return false;
+    }
+    return assembler.completed_windows() == 2 && assembler.rejected_windows() == 1 &&
+           queue.queued_windows() == 1;
 }
 
 bool test_preserves_fifo_order_and_samples() {
@@ -206,6 +251,31 @@ bool test_partial_drain_retains_remaining_fifo_entries() {
     return queue.queued_windows() == 0 && queue.dropped_windows() == 0;
 }
 
+bool test_dropped_windows_remain_visible_after_queue_recovers() {
+    Queue queue;
+    std::array<float, kSamples> window{};
+    for (unsigned id = 1; id <= 3; ++id) {
+        window.fill(static_cast<float>(id));
+        if (!queue.try_push(window.data(), window.size())) return false;
+    }
+    window.fill(4.0F);
+    if (queue.try_push(window.data(), window.size()) || queue.dropped_windows() != 1) {
+        return false;
+    }
+    for (unsigned expected = 1; expected <= 3; ++expected) {
+        bool intact = false;
+        if (!queue.try_consume_one([&](const float* samples, std::size_t count) {
+                intact = count == kSamples && samples[0] == expected &&
+                         samples[count - 1] == expected;
+            }) || !intact) {
+            return false;
+        }
+    }
+    window.fill(5.0F);
+    return queue.try_push(window.data(), window.size()) &&
+           queue.dropped_windows() == 1 && queue.queued_windows() == 1;
+}
+
 bool test_single_producer_consumer_publication() {
     constexpr unsigned kWindowCount = 20000;
     Queue queue;
@@ -251,10 +321,15 @@ bool test_single_producer_consumer_publication() {
         if (consumed) {
             ++expected;
         } else if (producer_done.load(std::memory_order_acquire)) {
-            valid.store(false, std::memory_order_relaxed);
-            failure_reason = 3;
-            failure_expected = expected;
-            break;
+            // The empty read can precede the acquire of producer_done. Once
+            // completion is visible, recheck the queue before declaring loss.
+            if (queue.queued_windows() == 0) {
+                valid.store(false, std::memory_order_relaxed);
+                failure_reason = 3;
+                failure_expected = expected;
+                break;
+            }
+            std::this_thread::yield();
         } else {
             std::this_thread::yield();
         }
@@ -276,6 +351,8 @@ bool test_single_producer_consumer_publication() {
 int main() {
     bool (*tests[])() = {
         test_rejects_invalid_windows,
+        test_segment_restart_never_splices_audio_windows,
+        test_queue_rejection_does_not_poison_the_next_complete_window,
         test_preserves_fifo_order_and_samples,
         test_empty_consume_does_not_invoke_consumer,
         test_full_queue_drops_without_overwriting,
@@ -285,9 +362,12 @@ int main() {
         test_full_queue_keeps_oldest_windows_and_rejects_newest,
         test_multiple_queue_wraps_keep_window_edges_intact,
         test_partial_drain_retains_remaining_fifo_entries,
+        test_dropped_windows_remain_visible_after_queue_recovers,
         test_single_producer_consumer_publication};
     const char* names[] = {
         "invalid windows",
+        "segment restart isolates analysis windows",
+        "queue rejection preserves following windows",
         "FIFO order and samples",
         "empty queue does not call consumer",
         "full queue preserves existing data",
@@ -297,6 +377,7 @@ int main() {
         "full queue preserves oldest windows",
         "repeated queue wraps preserve window edges",
         "partial drain preserves FIFO entries",
+        "dropped analysis window remains visible after recovery",
         "SPSC publication stress"};
     for (std::size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); ++index) {
         if (!tests[index]()) {

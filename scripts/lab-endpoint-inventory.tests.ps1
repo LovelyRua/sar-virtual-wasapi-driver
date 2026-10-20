@@ -44,11 +44,31 @@ try {
     }
     Set-Content -LiteralPath $reportPath -Value '{"Passed":true}' -Encoding UTF8
     Set-Content -LiteralPath $inventory -Value "Render endpoints:`n  Broken endpoint`nCapture endpoints:" -Encoding UTF8
-    $failedOutput = & $shell -NoProfile -File $checker -InventoryPath $inventory -ReportPath $reportPath 2>&1
-    if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $reportPath)) {
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $failedOutput = & $shell -NoProfile -File $checker `
+            -InventoryPath $inventory -ReportPath $reportPath 2>&1
+        $failedExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($failedExitCode -eq 0 -or (Test-Path -LiteralPath $reportPath)) {
         throw "Malformed inventory left a stale report or succeeded: $failedOutput"
     }
-    Write-Output 'lab_endpoint_inventory_tests passed=5'
+
+    $stream = [IO.File]::Open($inventory, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+    try { $stream.SetLength(4MB + 1) } finally { $stream.Dispose() }
+    Set-Content -LiteralPath $reportPath -Value '{"Passed":true}' -Encoding UTF8
+    $oversizedOutput = & $shell -NoProfile -File $checker `
+        -InventoryPath $inventory -ReportPath $reportPath 2>&1
+    $oversizedExitCode = $LASTEXITCODE
+    if ($oversizedExitCode -eq 0 -or
+        ($oversizedOutput -join ' ') -notmatch '4194304-byte' -or
+        (Test-Path -LiteralPath $reportPath)) {
+        throw "Oversized inventory was read or left a stale report: $oversizedOutput"
+    }
+    Write-Output 'lab_endpoint_inventory_tests passed=6'
 } finally {
     Remove-Item -LiteralPath $inventory -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $reportPath -ErrorAction SilentlyContinue

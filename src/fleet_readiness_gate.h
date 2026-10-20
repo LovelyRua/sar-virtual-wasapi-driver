@@ -1,0 +1,172 @@
+#pragma once
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cwctype>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace sar::devices {
+
+inline std::chrono::steady_clock::duration bounded_readiness_poll_delay(
+    std::chrono::steady_clock::time_point deadline,
+    std::chrono::steady_clock::time_point now,
+    std::chrono::milliseconds poll_interval) noexcept {
+    using Clock = std::chrono::steady_clock;
+    if (now >= deadline || poll_interval <= std::chrono::milliseconds::zero()) {
+        return Clock::duration::zero();
+    }
+    const auto interval = std::chrono::duration_cast<Clock::duration>(poll_interval);
+    const auto remaining = deadline - now;
+    return interval < remaining ? interval : remaining;
+}
+
+inline bool same_instance_roster(std::vector<std::wstring> expected,
+                                 std::vector<std::wstring> observed) {
+    const auto less_id = [](const std::wstring& lhs,
+                            const std::wstring& rhs) {
+        return std::lexicographical_compare(
+            lhs.begin(), lhs.end(), rhs.begin(), rhs.end(),
+            [](wchar_t left, wchar_t right) {
+                return std::towupper(left) < std::towupper(right);
+            });
+    };
+    const auto equal_id = [](const std::wstring& lhs,
+                             const std::wstring& rhs) {
+        return lhs.size() == rhs.size() &&
+               std::equal(lhs.begin(), lhs.end(), rhs.begin(),
+                          [](wchar_t left, wchar_t right) {
+                              return std::towupper(left) == std::towupper(right);
+                          });
+    };
+    std::sort(expected.begin(), expected.end(), less_id);
+    std::sort(observed.begin(), observed.end(), less_id);
+    const auto has_duplicates = [&](const std::vector<std::wstring>& ids) {
+        for (std::size_t index = 1; index < ids.size(); ++index) {
+            if (equal_id(ids[index - 1], ids[index])) return true;
+        }
+        return false;
+    };
+    if (has_duplicates(expected) || has_duplicates(observed)) return false;
+    if (expected.size() != observed.size()) return false;
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        if (!equal_id(expected[index], observed[index])) return false;
+    }
+    return true;
+}
+
+// Teardown is complete only when the expected adapter roster and its endpoint
+// ownership both remain absent for consecutive inventory samples.
+class InstanceRemovalGate {
+public:
+    explicit InstanceRemovalGate(unsigned required_samples = 3) noexcept
+        : required_samples_(required_samples == 0 ? 1 : required_samples) {}
+
+    bool observe(const std::vector<std::wstring>& expected_roster,
+                 const std::vector<std::wstring>& observed_roster,
+                 bool owned_endpoints_absent) {
+        if (!same_instance_roster(expected_roster, observed_roster) ||
+            !owned_endpoints_absent) {
+            consecutive_samples_ = 0;
+            return false;
+        }
+        if (consecutive_samples_ < required_samples_) ++consecutive_samples_;
+        return consecutive_samples_ >= required_samples_;
+    }
+
+    void reset() noexcept { consecutive_samples_ = 0; }
+    unsigned stable_samples() const noexcept { return consecutive_samples_; }
+
+private:
+    unsigned required_samples_;
+    unsigned consecutive_samples_ = 0;
+};
+
+// A fleet is stable only while the same non-empty set of adapters is ready
+// across consecutive inventory samples. Endpoint arrival/removal can otherwise
+// make a partially published topology look ready for one polling interval.
+class FleetReadinessGate {
+public:
+    explicit FleetReadinessGate(unsigned required_samples = 3) noexcept
+        : required_samples_(required_samples == 0 ? 1 : required_samples) {}
+
+    bool observe(std::vector<std::wstring> instance_ids, bool all_ready) {
+        canonicalize(instance_ids);
+        if (has_duplicates(instance_ids)) {
+            reset();
+            return false;
+        }
+
+        if (!has_roster_ || !same_roster(instance_ids, roster_)) {
+            roster_ = std::move(instance_ids);
+            has_roster_ = true;
+            consecutive_samples_ = 0;
+        }
+
+        if (roster_.empty() || !all_ready) {
+            consecutive_samples_ = 0;
+            return false;
+        }
+
+        if (consecutive_samples_ < required_samples_) {
+            ++consecutive_samples_;
+        }
+        return consecutive_samples_ >= required_samples_;
+    }
+
+    void reset() noexcept {
+        roster_.clear();
+        has_roster_ = false;
+        consecutive_samples_ = 0;
+    }
+
+    unsigned stable_samples() const noexcept { return consecutive_samples_; }
+
+private:
+    static wchar_t fold(wchar_t value) noexcept {
+        return static_cast<wchar_t>(std::towupper(value));
+    }
+
+    static bool less_id(const std::wstring& lhs, const std::wstring& rhs) {
+        return std::lexicographical_compare(
+            lhs.begin(), lhs.end(), rhs.begin(), rhs.end(),
+            [](wchar_t left, wchar_t right) { return fold(left) < fold(right); });
+    }
+
+    static bool equal_id(const std::wstring& lhs, const std::wstring& rhs) {
+        return lhs.size() == rhs.size() &&
+               std::equal(lhs.begin(), lhs.end(), rhs.begin(),
+                          [](wchar_t left, wchar_t right) {
+                              return fold(left) == fold(right);
+                          });
+    }
+
+    static void canonicalize(std::vector<std::wstring>& ids) {
+        std::sort(ids.begin(), ids.end(), less_id);
+    }
+
+    static bool has_duplicates(const std::vector<std::wstring>& ids) {
+        for (std::size_t index = 1; index < ids.size(); ++index) {
+            if (equal_id(ids[index - 1], ids[index])) return true;
+        }
+        return false;
+    }
+
+    static bool same_roster(const std::vector<std::wstring>& lhs,
+                            const std::vector<std::wstring>& rhs) {
+        if (lhs.size() != rhs.size()) return false;
+        for (std::size_t index = 0; index < lhs.size(); ++index) {
+            if (!equal_id(lhs[index], rhs[index])) return false;
+        }
+        return true;
+    }
+
+    unsigned required_samples_;
+    unsigned consecutive_samples_ = 0;
+    bool has_roster_ = false;
+    std::vector<std::wstring> roster_;
+};
+
+} // namespace sar::devices

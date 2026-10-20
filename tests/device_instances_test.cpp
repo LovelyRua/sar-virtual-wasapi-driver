@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include "src/device_instances.h"
+#include "src/wasapi_inventory.h"
 
 #include <windows.h>
 
@@ -40,10 +41,35 @@ bool test_sar_hardware_id_matches_both_infs() {
                "audio/sysvad/TabletAudioSample/ComponentizedAudioSampleExtension.inx");
 }
 
+bool test_experimental_fleet_capacity_is_four_instances() {
+    if (sar::devices::kMaximumInstances != 4) return false;
+    for (std::size_t current = 0; current < sar::devices::kMaximumInstances;
+         ++current) {
+        if (!sar::devices::can_add_instance(current)) return false;
+    }
+    return !sar::devices::can_add_instance(sar::devices::kMaximumInstances);
+}
+
+bool test_instance_and_endpoint_parent_matching_is_case_insensitive() {
+    if (!sar::devices::same_instance_id(L"ROOT\\MEDIA\\0001",
+                                        L"root\\media\\0001") ||
+        sar::devices::same_instance_id(L"ROOT\\MEDIA\\0001",
+                                      L"ROOT\\MEDIA\\0002")) return false;
+    sar::devices::WasapiEndpoint endpoint;
+    endpoint.parent_device_id = L"Root\\Media\\0001";
+    if (!sar::devices::endpoint_parent_matches(endpoint, L"root\\media\\0001")) {
+        return false;
+    }
+    endpoint.parent_device_id.clear();
+    return !sar::devices::endpoint_parent_matches(endpoint, L"ROOT\\MEDIA\\0001");
+}
+
 } // namespace
 
 int wmain() {
     if (!test_sar_hardware_id_matches_both_infs()) return 11;
+    if (!test_experimental_fleet_capacity_is_four_instances()) return 15;
+    if (!test_instance_and_endpoint_parent_matching_is_case_insensitive()) return 14;
 
     std::vector<sar::devices::Instance> instances;
     auto result = sar::devices::list(instances);

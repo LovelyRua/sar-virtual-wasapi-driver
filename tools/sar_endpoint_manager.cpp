@@ -1,10 +1,15 @@
 #ifdef _WIN32
 
 #include "src/device_instances.h"
+#include "src/endpoint_removal.h"
 #include "src/endpoint_readiness.h"
+#include "src/fleet_readiness.h"
+#include "src/fleet_audio_probe_plan.h"
 #include "src/wasapi_inventory.h"
 
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -25,14 +30,18 @@ void usage() {
         << L"  sar_endpoint_manager list [--json]\n"
         << L"  sar_endpoint_manager add <signed-driver.inf> <label>\n"
         << L"  sar_endpoint_manager rename <instance-id> <label>\n"
-        << L"  sar_endpoint_manager remove <instance-id> --confirm\n"
+        << L"  sar_endpoint_manager remove <instance-id> --confirm [--wait-ms <timeout>] [--json]\n"
         << L"  sar_endpoint_manager endpoints [all|render|capture] [--json]\n"
         << L"  sar_endpoint_manager summary [--json]\n"
         << L"  sar_endpoint_manager wait-endpoints <all|render|capture> <count> <timeout-ms>\n"
         << L"  sar_endpoint_manager diagnose <instance-id> [--json]\n"
         << L"  sar_endpoint_manager wait-ready <instance-id> <timeout-ms> [--json]\n"
+        << L"  sar_endpoint_manager fleet [--json]\n"
+        << L"  sar_endpoint_manager wait-fleet <timeout-ms> [--json]\n"
+        << L"  sar_endpoint_manager probe-plan <timeout-ms> [--json]\n"
         << L"  sar_endpoint_manager help\n\n"
-        << L"Prototype limit: two instances, each with two stereo bus pairs.\n"
+        << L"Experimental limit: four instances, each with two fixed render/capture bus pairs.\n"
+        << L"The eight-bus capacity is not a long-duration stability qualification.\n"
         << L"This tool does not create arbitrary channel counts or remove\n"
         << L"shared driver packages. It requires elevation for edits.\n";
 }
@@ -267,6 +276,28 @@ bool elevated() {
     return ok && elevation.TokenIsElevated != 0;
 }
 
+class MutationGuard {
+public:
+    explicit MutationGuard(bool enabled) {
+        if (!enabled) return;
+        handle_ = CreateMutexW(nullptr, FALSE,
+            L"Global\\SAR.VirtualWASAPI.InstanceManagement.v1");
+        if (!handle_) return;
+        const DWORD result = WaitForSingleObject(handle_, 0);
+        acquired_ = result == WAIT_OBJECT_0 || result == WAIT_ABANDONED;
+    }
+    ~MutationGuard() {
+        if (acquired_) ReleaseMutex(handle_);
+        if (handle_) CloseHandle(handle_);
+    }
+    MutationGuard(const MutationGuard&) = delete;
+    MutationGuard& operator=(const MutationGuard&) = delete;
+    bool acquired() const { return acquired_; }
+private:
+    HANDLE handle_ = nullptr;
+    bool acquired_ = false;
+};
+
 void print_instance(const sar::devices::Instance& instance) {
     std::wcout << instance.id << L'\n'
                << L"  label: " << instance.label << L'\n'
@@ -366,6 +397,58 @@ int diagnose(const std::wstring& instance_id, bool as_json, bool wait,
     return 1;
 }
 
+void print_fleet_json(const sar::devices::FleetReadiness& readiness) {
+    std::wcout << L"{\"state\":";
+    json_string(sar::devices::fleet_readiness_state_name(readiness.state));
+    std::wcout << L",\"ready\":" << (readiness.ready() ? L"true" : L"false")
+               << L",\"readyInstances\":" << readiness.ready_instances()
+               << L",\"instanceCount\":" << readiness.instances.size()
+               << L",\"stableSamples\":" << readiness.stable_samples
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(readiness.inventory_error)
+               << L",\"instances\":[";
+    for (size_t index = 0; index < readiness.instances.size(); ++index) {
+        if (index) std::wcout << L',';
+        print_readiness_json(readiness.instances[index]);
+    }
+    std::wcout << L"]}";
+}
+
+void print_fleet(const sar::devices::FleetReadiness& readiness) {
+    std::wcout << L"SAR fleet readiness: "
+               << sar::devices::fleet_readiness_state_name(readiness.state) << L'\n'
+               << L"  ready instances: " << readiness.ready_instances() << L" / "
+               << readiness.instances.size() << L'\n'
+               << L"  consecutive stable samples: " << readiness.stable_samples << L" / "
+               << sar::devices::kStableReadinessSamples << L'\n';
+    for (const auto& instance : readiness.instances) {
+        print_readiness(instance);
+    }
+}
+
+int fleet(bool wait, unsigned timeout_ms, bool as_json) {
+    sar::devices::FleetReadiness readiness;
+    const HRESULT result = wait
+        ? sar::devices::wait_for_fleet_readiness(timeout_ms, readiness)
+        : sar::devices::inspect_fleet_readiness(readiness);
+
+    if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) {
+        std::wcerr << L"Fleet readiness inspection failed: 0x" << std::hex
+                   << static_cast<unsigned long>(result) << std::dec << L'\n';
+        return 1;
+    }
+    if (as_json) {
+        print_fleet_json(readiness);
+        std::wcout << L'\n';
+    } else {
+        print_fleet(readiness);
+    }
+    if (readiness.ready()) return 0;
+    if (result == HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 3;
+    if (readiness.state == sar::devices::FleetReadinessState::no_instances) return 4;
+    return 1;
+}
+
 bool parse_timeout(const wchar_t* text, unsigned& timeout_ms) {
     if (!text || !*text) return false;
     wchar_t* end = nullptr;
@@ -373,6 +456,70 @@ bool parse_timeout(const wchar_t* text, unsigned& timeout_ms) {
     if (!end || *end || value == 0 || value > 120000) return false;
     timeout_ms = static_cast<unsigned>(value);
     return true;
+}
+
+void print_probe_plan_json(const sar::devices::FleetReadiness& fleet,
+                           const sar::devices::FleetAudioProbePlan& plan) {
+    std::wcout << L"{\"state\":";
+    json_string(plan.ready() ? L"ready" :
+                sar::devices::fleet_readiness_state_name(fleet.state));
+    std::wcout << L",\"ready\":" << (plan.ready() ? L"true" : L"false")
+               << L",\"stableSamples\":" << fleet.stable_samples
+               << L",\"instanceCount\":" << fleet.instances.size()
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(fleet.inventory_error)
+               << L",\"busCount\":" << plan.buses.size()
+               << L",\"error\":";
+    json_string(plan.error);
+    std::wcout << L",\"buses\":[";
+    for (size_t index = 0; index < plan.buses.size(); ++index) {
+        if (index) std::wcout << L',';
+        const auto& bus = plan.buses[index];
+        std::wcout << L"{\"instanceId\":";
+        json_string(bus.instance_id);
+        std::wcout << L",\"instanceLabel\":";
+        json_string(bus.instance_label);
+        std::wcout << L",\"fleetBus\":" << bus.fleet_bus
+                   << L",\"instanceBus\":" << bus.instance_bus
+                   << L",\"renderEndpointId\":";
+        json_string(bus.render_endpoint_id);
+        std::wcout << L",\"captureEndpointId\":";
+        json_string(bus.capture_endpoint_id);
+        std::wcout << L'}';
+    }
+    std::wcout << L"]}";
+}
+
+int probe_plan(unsigned timeout_ms, bool as_json) {
+    sar::devices::FleetReadiness readiness;
+    const HRESULT result = sar::devices::wait_for_fleet_readiness(timeout_ms, readiness);
+    sar::devices::FleetAudioProbePlan plan;
+    sar::devices::build_fleet_audio_probe_plan(readiness, plan);
+
+    if (as_json) {
+        print_probe_plan_json(readiness, plan);
+        std::wcout << L'\n';
+    } else if (plan.ready()) {
+        std::wcout << L"Stable fleet audio probe plan: " << plan.buses.size()
+                   << L" bus pairs across " << readiness.instances.size()
+                   << L" adapter(s)\n";
+        for (const auto& bus : plan.buses) {
+            std::wcout << L"  bus " << bus.fleet_bus << L" (adapter bus "
+                       << bus.instance_bus << L") | " << bus.instance_id << L" |\n"
+                       << L"    render: " << bus.render_endpoint_id << L'\n'
+                       << L"    capture: " << bus.capture_endpoint_id << L'\n';
+        }
+    } else {
+        std::wcerr << L"Audio probe plan unavailable: " << plan.error << L'\n';
+        print_fleet(readiness);
+    }
+
+    if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 1;
+    if (plan.ready()) return 0;
+    if (result == HRESULT_FROM_WIN32(ERROR_TIMEOUT)) return 3;
+    if (readiness.state == sar::devices::FleetReadinessState::no_instances &&
+        SUCCEEDED(result)) return 4;
+    return 1;
 }
 
 int list() {
@@ -443,9 +590,64 @@ int remove(const std::wstring& id) {
     return 0;
 }
 
+void print_removal_json(
+    const sar::devices::InstanceRemovalReadiness& readiness) {
+    std::wcout << L"{\"instanceId\":";
+    json_string(readiness.instance_id);
+    std::wcout << L",\"state\":";
+    json_string(sar::devices::removal_state_name(readiness.state));
+    std::wcout << L",\"removed\":" << (readiness.removed() ? L"true" : L"false")
+               << L",\"initialEndpointCount\":" << readiness.initial_endpoint_count
+               << L",\"remainingEndpointCount\":" << readiness.remaining_endpoint_count
+               << L",\"unassociatedEndpointCount\":"
+               << readiness.unassociated_endpoint_count
+               << L",\"stableSamples\":" << readiness.stable_samples
+               << L",\"expectedRosterCount\":" << readiness.expected_roster.size()
+               << L",\"observedRosterCount\":" << readiness.observed_roster.size()
+               << L",\"inventoryHresult\":"
+               << static_cast<unsigned long>(readiness.inventory_error) << L"}\n";
+}
+
+int remove_and_wait(const std::wstring& id, unsigned timeout_ms, bool as_json) {
+    sar::devices::InstanceRemovalReadiness readiness;
+    const HRESULT result = sar::devices::remove_and_wait(id, timeout_ms, readiness);
+    if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_TIMEOUT)) {
+        std::wcerr << L"Remove operation failed: 0x" << std::hex
+                   << static_cast<unsigned long>(result) << std::dec << L'\n';
+        return 1;
+    }
+    if (as_json) {
+        print_removal_json(readiness);
+    } else {
+        std::wcout << L"Removal state: "
+                   << sar::devices::removal_state_name(readiness.state) << L"\n"
+                   << L"  instance: " << readiness.instance_id << L"\n"
+                   << L"  endpoints before/remaining: "
+                   << readiness.initial_endpoint_count << L" / "
+                   << readiness.remaining_endpoint_count << L"\n"
+                   << L"  unassociated endpoints: "
+                   << readiness.unassociated_endpoint_count << L"\n"
+                   << L"  stable samples: " << readiness.stable_samples << L"\n";
+    }
+    if (readiness.removed()) {
+        if (!as_json) {
+            std::wcout << L"The shared signed driver package remains installed.\n";
+        }
+        return 0;
+    }
+    std::wcerr << L"Removal was requested, but the PnP/WASAPI teardown did not "
+               << L"reach a stable absent state before timeout. The device is "
+               << L"not reinstalled automatically.\n";
+    return 3;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    // Redirected JSON must preserve non-ASCII adapter labels independently of
+    // the caller's console code page. All output in this executable is wide.
+    if (_setmode(_fileno(stdout), _O_U8TEXT) == -1 ||
+        _setmode(_fileno(stderr), _O_U8TEXT) == -1) return 1;
     if (argc == 2 && std::wcscmp(argv[1], L"help") == 0) {
         usage();
         return 0;
@@ -488,7 +690,44 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 5 && !as_json) return 2;
         return diagnose(argv[2], as_json, true, timeout_ms);
     }
+    if (argc == 2 && std::wcscmp(argv[1], L"fleet") == 0) {
+        return fleet(false, 0, false);
+    }
+    if (argc == 3 && std::wcscmp(argv[1], L"fleet") == 0 &&
+        std::wcscmp(argv[2], L"--json") == 0) {
+        return fleet(false, 0, true);
+    }
+    if ((argc == 3 || argc == 4) && std::wcscmp(argv[1], L"wait-fleet") == 0) {
+        unsigned timeout_ms = 0;
+        if (!parse_timeout(argv[2], timeout_ms)) return 2;
+        const bool as_json = argc == 4 && std::wcscmp(argv[3], L"--json") == 0;
+        if (argc == 4 && !as_json) return 2;
+        return fleet(true, timeout_ms, as_json);
+    }
+    if ((argc == 3 || argc == 4) && std::wcscmp(argv[1], L"probe-plan") == 0) {
+        unsigned timeout_ms = 0;
+        if (!parse_timeout(argv[2], timeout_ms)) return 2;
+        const bool as_json = argc == 4 && std::wcscmp(argv[3], L"--json") == 0;
+        if (argc == 4 && !as_json) return 2;
+        return probe_plan(timeout_ms, as_json);
+    }
 
+    const bool mutation = argc >= 2 &&
+        (std::wcscmp(argv[1], L"add") == 0 ||
+         std::wcscmp(argv[1], L"rename") == 0 ||
+         std::wcscmp(argv[1], L"remove") == 0);
+    if (mutation && !elevated()) {
+        std::wcerr << L"error: an elevated prompt is required for edits\n";
+        return 1;
+    }
+    // Serialize all elevated clients, including two GUI processes and manual
+    // CLI invocations. Never queue a stale destructive request behind another.
+    const MutationGuard mutation_guard(mutation);
+    if (mutation && !mutation_guard.acquired()) {
+        std::wcerr << L"error: another instance manager is editing devices, "
+                   << L"or the management lock could not be opened\n";
+        return 5;
+    }
     if (argc == 4 && std::wcscmp(argv[1], L"add") == 0) {
         if (!elevated()) {
             std::wcerr << L"error: an elevated prompt is required for add\n";
@@ -503,13 +742,29 @@ int wmain(int argc, wchar_t** argv) {
         }
         return rename(argv[2], argv[3]);
     }
-    if (argc == 4 && std::wcscmp(argv[1], L"remove") == 0 &&
+    if (argc >= 4 && std::wcscmp(argv[1], L"remove") == 0 &&
         std::wcscmp(argv[3], L"--confirm") == 0) {
+        unsigned timeout_ms = 0;
+        bool wait_requested = false;
+        bool as_json = false;
+        for (int index = 4; index < argc; ++index) {
+            if (std::wcscmp(argv[index], L"--json") == 0 && !as_json) {
+                as_json = true;
+            } else if (std::wcscmp(argv[index], L"--wait-ms") == 0 &&
+                       !wait_requested && index + 1 < argc) {
+                if (!parse_timeout(argv[++index], timeout_ms)) return 2;
+                wait_requested = true;
+            } else {
+                return 2;
+            }
+        }
+        if (as_json && !wait_requested) return 2;
         if (!elevated()) {
             std::wcerr << L"error: an elevated prompt is required for remove\n";
             return 1;
         }
-        return remove(argv[2]);
+        return wait_requested ? remove_and_wait(argv[2], timeout_ms, as_json)
+                              : remove(argv[2]);
     }
     usage();
     return 2;
