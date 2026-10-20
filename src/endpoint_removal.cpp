@@ -4,6 +4,7 @@
 
 #include "fleet_readiness_gate.h"
 #include "endpoint_readiness.h"
+#include "endpoint_removal_policy.h"
 #include "wasapi_inventory.h"
 
 #include <algorithm>
@@ -43,7 +44,8 @@ void endpoint_ids_for(const std::vector<WasapiEndpoint>& endpoints,
                       std::vector<std::wstring>& ids) {
     ids.clear();
     for (const WasapiEndpoint& endpoint : endpoints) {
-        if (endpoint_parent_matches(endpoint, instance_id)) {
+        if (endpoint_can_block_removal(endpoint) &&
+            endpoint_parent_matches(endpoint, instance_id)) {
             ids.push_back(endpoint.id);
         }
     }
@@ -63,8 +65,9 @@ size_t count_remaining_endpoints(
     const std::vector<std::wstring>& known_ids) {
     size_t remaining = 0;
     for (const WasapiEndpoint& endpoint : endpoints) {
-        if (endpoint_parent_matches(endpoint, instance_id) ||
-            known_endpoint(endpoint.id, known_ids)) {
+        if (endpoint_can_block_removal(endpoint) &&
+            (endpoint_parent_matches(endpoint, instance_id) ||
+             known_endpoint(endpoint.id, known_ids))) {
             ++remaining;
         }
     }
@@ -76,8 +79,7 @@ size_t count_unassociated_endpoints(
     return static_cast<size_t>(std::count_if(
         endpoints.begin(), endpoints.end(),
         [](const WasapiEndpoint& endpoint) {
-            return endpoint.parent_device_id.empty() ||
-                   FAILED(endpoint.parent_lookup_error);
+            return endpoint_removal_ownership_unknown(endpoint);
         }));
 }
 

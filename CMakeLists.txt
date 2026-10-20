@@ -174,6 +174,14 @@ endif()
 add_test(NAME instance_removal_gate_test COMMAND instance_removal_gate_test)
 
 if(WIN32)
+  add_executable(endpoint_removal_policy_test tests/endpoint_removal_policy_test.cpp)
+  target_compile_features(endpoint_removal_policy_test PRIVATE cxx_std_17)
+  target_include_directories(endpoint_removal_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(MSVC)
+    target_compile_options(endpoint_removal_policy_test PRIVATE /W4 /WX)
+  endif()
+  add_test(NAME endpoint_removal_policy_test COMMAND endpoint_removal_policy_test)
+
   add_library(sar_device_instances STATIC src/device_instances.cpp)
   target_sources(sar_device_instances PRIVATE
     src/wasapi_inventory.cpp
